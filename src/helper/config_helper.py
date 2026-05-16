@@ -335,12 +335,12 @@ def batch_save(updates: Dict[str, Any], class_updates: Optional[Dict[str, Dict[s
         data[key] = value
 
     if class_updates:
-        current_class = data.get('class', 'Paladin')
-        if current_class not in data.get('classes', {}):
-            data.setdefault('classes', {})[current_class] = {}
-        cls_cfg = data['classes'][current_class]
-        for key, value in class_updates.items():
-            cls_cfg[key] = value
+        for cls_name, cls_fields in class_updates.items():
+            if cls_name not in data.get('classes', {}):
+                data.setdefault('classes', {})[cls_name] = {}
+            cls_cfg = data['classes'][cls_name]
+            for key, value in cls_fields.items():
+                cls_cfg[key] = value
 
     write_config(data)
 
