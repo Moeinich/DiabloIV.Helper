@@ -1,4 +1,6 @@
 import os
+import time
+import ctypes
 from typing import Tuple, Optional, Any
 import pyautogui
 import numpy as np
@@ -9,6 +11,10 @@ from math import sqrt
 from helper import mouse_helper, logging_helper
 
 _needle_cache = {}
+
+_screenshot_cache = None
+_screenshot_cache_time = 0.0
+_SCREENSHOT_CACHE_TTL = 0.05
 
 
 def _get_needle_image(path: str):
@@ -24,6 +30,32 @@ def clear_needle_cache():
     _needle_cache.clear()
 
 
+def clear_screenshot_cache():
+    global _screenshot_cache, _screenshot_cache_time
+    _screenshot_cache = None
+    _screenshot_cache_time = 0.0
+
+
+def _get_screenshot(region=None):
+    global _screenshot_cache, _screenshot_cache_time
+    now = time.monotonic()
+    if region is None and _screenshot_cache is not None and (now - _screenshot_cache_time) < _SCREENSHOT_CACHE_TTL:
+        return _screenshot_cache
+    if region is not None:
+        return ImageGrab.grab(bbox=region)
+    img = ImageGrab.grab()
+    _screenshot_cache = img
+    _screenshot_cache_time = now
+    return img
+
+
+def _read_pixel(x: int, y: int) -> Tuple[int, int, int]:
+    hdc = ctypes.windll.user32.GetDC(0)
+    color = ctypes.windll.gdi32.GetPixel(hdc, int(x), int(y))
+    ctypes.windll.user32.ReleaseDC(0, hdc)
+    return (color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF)
+
+
 def get_pixel_color_at_cursor() -> Tuple[int, int, int, int, int]:
     """
     Get the color of the pixel under the cursor.
@@ -32,7 +64,7 @@ def get_pixel_color_at_cursor() -> Tuple[int, int, int, int, int]:
     """
     try:
         x, y = mouse_helper.position()
-        r, g, b = pyautogui.screenshot().getpixel((x, y))
+        r, g, b = _read_pixel(x, y)
         return x, y, r, g, b
     except Exception as ex:
         logging_helper.log_debug(f"get_pixel_color_at_cursor failed: {ex}")
@@ -46,7 +78,7 @@ def get_pixel_color_at_coords(x: int, y: int) -> Tuple[int, int, int]:
         tuple: (r, g, b) - Pixel color.
     """
     try:
-        r, g, b = pyautogui.screenshot().getpixel((int(x), int(y)))
+        r, g, b = _read_pixel(x, y)
         return r, g, b
     except Exception as ex:
         logging_helper.log_debug(f"get_pixel_color_at_coords({x},{y}) failed: {ex}")
@@ -102,7 +134,12 @@ def pixel_matches_color(x: int, y: int, exR: int, exG: int, exB: int, tolerance:
     Check if a pixel matches the expected RGB color within a tolerance.
     """
     try:
-        r, g, b = pyautogui.screenshot().getpixel((int(x), int(y)))
+        hdc = ctypes.windll.user32.GetDC(0)
+        color = ctypes.windll.gdi32.GetPixel(hdc, int(x), int(y))
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+        r = color & 0xFF
+        g = (color >> 8) & 0xFF
+        b = (color >> 16) & 0xFF
         return all(abs(int(actual) - int(expected)) <= int(tolerance)
                    for actual, expected in zip((r, g, b), (exR, exG, exB)))
     except Exception as ex:
@@ -235,7 +272,11 @@ def locate_needle(
             needle_img = _get_needle_image(needle)
             if needle_img is None:
                 return False
-            res = pyautogui.locateOnScreen(needle_img, confidence=conf, region=region, grayscale=grayscale)
+            haystack_img = _get_screenshot()
+            if region is not None:
+                left, top, rw, rh = region
+                haystack_img = haystack_img.crop((left, top, left + rw, top + rh))
+            res = pyautogui.locate(needle_img, haystack_img, confidence=conf, grayscale=grayscale)
             if res:
                 log_result(True, "'l' image", res)
                 return True

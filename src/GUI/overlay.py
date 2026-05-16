@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QApplication, QComboBox, QMainWindow,
 from helper import config_helper, logging_helper, process_helper
 from bot import rotation, bot_config
 from GUI import toolbox
+from pynput import mouse as pynput_mouse
 
 WINDOW_X = 50
 WINDOW_Y = 200
@@ -74,6 +75,7 @@ class Overlay(QMainWindow):
         self.pause_req = False
         self._log_handler = None
         self._hotkey_str = None
+        self._mouse_listener = None
         self._live_viz = None
         self.name = config_helper.get_shared_config('apptitle', 'notepad')
         self.proc = process_helper.ProcessHelper()
@@ -112,13 +114,36 @@ class Overlay(QMainWindow):
         add_hotkey('capslock', lambda: self.on_press('pause'))
 
     def _register_hotkey(self):
+        self._unregister_hotkey()
+        self._hotkey_str = config_helper.get_shared_config('rotation_hotkey', 'f6')
+        hk = self._hotkey_str
+        mouse_keys = {'mouse1': pynput_mouse.Button.left, 'mouse2': pynput_mouse.Button.right,
+                       'mouse3': pynput_mouse.Button.middle, 'x': pynput_mouse.Button.x1,
+                       'x2': pynput_mouse.Button.x2, 'x1': pynput_mouse.Button.x1}
+        if hk in mouse_keys:
+            btn = mouse_keys[hk]
+            self._mouse_listener = pynput_mouse.Listener(
+                on_click=lambda x, y, button, pressed: self._on_mouse_hotkey(button, pressed, btn))
+            self._mouse_listener.start()
+        else:
+            add_hotkey(hk, self.toggle_rotation)
+
+    def _unregister_hotkey(self):
+        if self._mouse_listener is not None:
+            try:
+                self._mouse_listener.stop()
+            except Exception:
+                pass
+            self._mouse_listener = None
         if self._hotkey_str:
             try:
                 remove_hotkey(self._hotkey_str)
             except Exception:
                 pass
-        self._hotkey_str = config_helper.get_shared_config('rotation_hotkey', 'f6')
-        add_hotkey(self._hotkey_str, self.toggle_rotation)
+
+    def _on_mouse_hotkey(self, button, pressed, target):
+        if pressed and button == target:
+            self.toggle_rotation()
 
     def update_class(self, item, value=None):
         logging_helper.log_info(f'Preset {item}: {value}')
@@ -160,6 +185,7 @@ class Overlay(QMainWindow):
 
     def closeEvent(self, event):
         self.stop_rotation()
+        self._unregister_hotkey()
         root_logger = logging_helper.logger
         if self._log_handler:
             root_logger.removeHandler(self._log_handler)

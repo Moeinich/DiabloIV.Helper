@@ -3,7 +3,6 @@ from time import sleep
 from typing import Dict
 from pathlib import Path
 from pydirectinput import keyDown, keyUp, leftClick, rightClick
-from threading import Lock
 
 from helper import image_helper, timer_helper, logging_helper
 from helper.timer_helper import TIMER_STOPPED
@@ -41,42 +40,47 @@ PRIORITY_NOISE_CHANCE = 0.2
 
 class SkillCastTracker:
     _instance = None
-    _lock = Lock()
 
     def __new__(cls):
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._casts = {}
-                    cls._instance._flash_duration = 0.4
+            cls._instance = super().__new__(cls)
+            cls._instance._casts = {}
+            cls._instance._flash_duration = 0.4
         return cls._instance
 
     def record_cast(self, skill_key: str) -> None:
         import time
-        with self._lock:
-            self._casts[skill_key] = time.time()
+        self._casts[skill_key] = time.time()
 
     def is_flashing(self, skill_key: str) -> bool:
         import time
-        with self._lock:
-            if skill_key not in self._casts:
-                return False
-            elapsed = time.time() - self._casts[skill_key]
-            return elapsed < self._flash_duration
+        ts = self._casts.get(skill_key)
+        if ts is None:
+            return False
+        return (time.time() - ts) < self._flash_duration
 
     def get_all_flashing(self) -> Dict[str, float]:
         import time
-        with self._lock:
-            result = {}
-            for key, ts in self._casts.items():
-                elapsed = time.time() - ts
-                if elapsed < self._flash_duration:
-                    result[key] = elapsed
-            return result
+        now = time.time()
+        return {k: now - v for k, v in self._casts.items() if (now - v) < self._flash_duration}
 
 
 _cast_tracker = SkillCastTracker()
+
+_skill_states = {}
+
+
+def get_skill_states():
+    return _skill_states.copy()
+
+
+def _record_skill_state(key: str, found: bool, enabled: bool):
+    if not enabled:
+        _skill_states[key] = 'disabled'
+    elif found:
+        _skill_states[key] = 'ready'
+    else:
+        _skill_states[key] = 'cd'
 
 
 def _reaction_delay() -> float:
@@ -160,10 +164,14 @@ def handle_health_and_evade(c: bot_config.BotConfig, delay_mult: float = 1.0) ->
         if c.is_skill_enabled('pot'):
             if locate_and_use_potion(c, delay_mult):
                 logging_helper.log_info('Used potion')
+        else:
+            _record_skill_state('pot', False, False)
 
         if c.is_skill_enabled('evade'):
             if locate_and_use_evade(c, delay_mult):
                 logging_helper.log_info('Used evade')
+        else:
+            _record_skill_state('evade', False, False)
 
         return True
     except Exception as ex:
@@ -181,6 +189,8 @@ def locate_and_use_potion(c: bot_config.BotConfig, delay_mult: float = 1.0) -> b
         except Exception as ex:
             logging_helper.log_debug("locate_needle error for %s: %s" % (path, ex))
             found = False
+
+        _record_skill_state('pot', bool(found), True)
 
         if found and timer1.get_timer_state() == TIMER_STOPPED:
             timer1.start_timer(POTION_TIMER_SEC)
@@ -207,6 +217,8 @@ def locate_and_use_evade(c: bot_config.BotConfig, delay_mult: float = 1.0) -> bo
         except Exception as ex:
             logging_helper.log_debug("locate_needle error for evade: %s" % ex)
             found = False
+
+        _record_skill_state('evade', bool(found), True)
 
         if found and timer2.get_timer_state() == TIMER_STOPPED:
             timer2.start_timer(EVADE_TIMER_SEC)
@@ -240,6 +252,7 @@ def use_skills(c: bot_config.BotConfig, delay_mult: float = 1.0) -> None:
         for skill_key, skill_hotkey, icon_idx, skill_pos in skill_order:
             if c.is_skill_enabled(skill_key):
                 found = image_helper.locate_needle(c.skill_icon(icon_idx), conf=0.6, region=skill_pos)
+                _record_skill_state(skill_key, bool(found), True)
                 if found:
                     sleep(_reaction_delay() * delay_mult)
                     human_press(skill_hotkey)
@@ -248,12 +261,15 @@ def use_skills(c: bot_config.BotConfig, delay_mult: float = 1.0) -> None:
                     sleep(_post_cast_delay() * delay_mult)
                     cast_done = True
                     break
+            else:
+                _record_skill_state(skill_key, False, False)
 
         if not cast_done:
             sleep(uniform(HUMAN_SKILL_LOOP_MIN, HUMAN_SKILL_LOOP_MAX) * delay_mult)
 
         if c.is_skill_enabled('skill5'):
             found = image_helper.locate_needle(c.skill_icon('05'), conf=0.9, region=c.skill_region('skill5'))
+            _record_skill_state('skill5', bool(found), True)
             if found:
                 sleep(_reaction_delay() * delay_mult)
                 leftClick()
@@ -261,9 +277,12 @@ def use_skills(c: bot_config.BotConfig, delay_mult: float = 1.0) -> None:
                 logging_helper.log_info('Used skill 5 (LMouse)')
                 sleep(_post_cast_delay() * delay_mult)
                 return
+        else:
+            _record_skill_state('skill5', False, False)
 
         if c.is_skill_enabled('skill6'):
             found = image_helper.locate_needle(c.skill_icon('06'), conf=0.9, region=c.skill_region('skill6'))
+            _record_skill_state('skill6', bool(found), True)
             if found:
                 sleep(_reaction_delay() * delay_mult)
                 rightClick()
@@ -271,6 +290,8 @@ def use_skills(c: bot_config.BotConfig, delay_mult: float = 1.0) -> None:
                 logging_helper.log_info('Used skill 6 (RMouse)')
                 sleep(_post_cast_delay() * delay_mult)
                 return
+        else:
+            _record_skill_state('skill6', False, False)
 
         sleep(uniform(HUMAN_ULT_LOOP_MIN, HUMAN_ULT_LOOP_MAX) * delay_mult)
     except Exception as ex:

@@ -129,8 +129,9 @@ class LiveVisualizerWidget(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setGeometry(QApplication.desktop().screenGeometry())
-        self.cfg = config_helper.read_config()
         self._skill_states = {}
+        self._cached_cls_cfg = {}
+        self._cached_hp_vals = None
         self._cast_tracker = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._update_states)
@@ -144,44 +145,20 @@ class LiveVisualizerWidget(QWidget):
 
     def _update_states(self):
         try:
-            self.cfg = config_helper.read_config()
-            class_name = str(config_helper.get_shared_config('class', '')).strip().lower()
-            if not class_name:
-                return
-            skillpath = Path(__file__).resolve().parents[2] / "assets" / "skills"
-            icon_map = {'skill1': '01', 'skill2': '02', 'skill3': '03', 'skill4': '04', 'skill5': '05', 'skill6': '06'}
-            cls_cfg = config_helper.get_class_config(class_name.capitalize())
-
-            for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
-                if not cls_cfg.get(f'{key}_enabled', True):
-                    self._skill_states[key] = 'disabled'
-                    continue
-
-                if key in ('pot', 'evade'):
-                    icon_path = str(skillpath / f'{key}.png')
-                else:
-                    icon_path = str(skillpath / class_name / (icon_map[key] + '.png'))
-
-                pos = cls_cfg.get(f'{key}_pos')
-                if not pos or len(pos) < 4:
-                    self._skill_states[key] = 'cd'
-                    continue
-
-                region = (pos[0], pos[1], pos[0] + pos[2], pos[1] + pos[3])
-                conf = 0.9 if key in ('skill5', 'skill6') else 0.6
-                found = image_helper.locate_needle(icon_path, conf=conf, region=region)
-                self._skill_states[key] = 'ready' if found else 'cd'
-
+            from bot.rotation import get_skill_states
+            self._skill_states = get_skill_states()
+            self._cached_hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
+            current_class = config_helper.get_shared_config('class', 'Paladin')
+            self._cached_cls_cfg = config_helper.get_class_config(current_class)
         except Exception as ex:
             logging_helper.log_debug(f"LiveVisualizer._update_states error: {ex}")
-
         self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
+        hp_vals = self._cached_hp_vals
         if hp_vals and len(hp_vals) >= 2:
             hx, hy = hp_vals[0], hp_vals[1]
             hp_colors = hp_vals[2] if len(hp_vals) > 2 and isinstance(hp_vals[2], list) else [[95, 10, 15]]
@@ -200,11 +177,8 @@ class LiveVisualizerWidget(QWidget):
             'skill4': 'S4', 'skill5': 'S5', 'skill6': 'S6', 'pot': 'POT', 'evade': 'EVADE'
         }
 
-        current_class = config_helper.get_shared_config('class', 'Paladin')
-        cls_cfg = config_helper.get_class_config(current_class)
-
         for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
-            pos = cls_cfg.get(f'{key}_pos')
+            pos = self._cached_cls_cfg.get(f'{key}_pos')
             if not pos or len(pos) < 4:
                 continue
 
@@ -397,11 +371,13 @@ class Toolbox(QDialog):
         layout.addWidget(self._make_skill_row('evade', 'space', (346, 45), 'Evade', common_style, label_style), 10, 0, 1, 4)
 
         layout.addWidget(QLabel('Rotation Hotkey:'), 13, 0)
-        hotkey_ed = QLineEdit(str(self.cfg.get('rotation_hotkey', 'f6')))
-        hotkey_ed.setStyleSheet(common_style)
-        hotkey_ed.setFixedSize(80, 20)
-        hotkey_ed.setObjectName('rotation_hotkey')
-        layout.addWidget(hotkey_ed, 13, 1)
+        self._hotkey_btn = QPushButton(str(self.cfg.get('rotation_hotkey', 'f6')))
+        self._hotkey_btn.setStyleSheet('background:rgb(204,153,51); color: #e0e0e0; padding: 2px 8px;')
+        self._hotkey_btn.setFixedSize(120, 24)
+        self._hotkey_btn.setObjectName('rotation_hotkey_btn')
+        self._hotkey_btn.setToolTip('Click to capture a key or mouse button')
+        self._hotkey_btn.clicked.connect(self._capture_hotkey)
+        layout.addWidget(self._hotkey_btn, 13, 1)
 
         loadBtn = QPushButton('LOAD FROM CONFIG')
         loadBtn.clicked.connect(self.load_config_to_fields)
@@ -540,6 +516,51 @@ class Toolbox(QDialog):
         layout.addStretch(1)
         container.setLayout(layout)
         return container
+
+    def _capture_hotkey(self):
+        self._hotkey_btn.setText('Press a key or mouse button...')
+        self._hotkey_btn.setStyleSheet('background:rgb(0,120,200); color: white; padding: 2px 8px;')
+        self._hotkey_captured = None
+
+        from pynput import keyboard as pk, mouse as pm
+
+        def on_key_press(key):
+            try:
+                if hasattr(key, 'char') and key.char:
+                    name = key.char
+                elif hasattr(key, 'name'):
+                    name = key.name
+                else:
+                    name = str(key).replace('Key.', '')
+            except Exception:
+                name = str(key)
+            self._hotkey_captured = name
+            return False
+
+        def on_mouse_click(x, y, button, pressed):
+            if pressed:
+                btn_map = {'left': 'mouse1', 'right': 'mouse2', 'middle': 'mouse3', 'x1': 'x', 'x2': 'x2'}
+                self._hotkey_captured = btn_map.get(button.name, button.name)
+                return False
+
+        kb_listener = pk.Listener(on_press=on_key_press, on_release=lambda k: False if self._hotkey_captured else True)
+        ms_listener = pm.Listener(on_click=on_mouse_click)
+
+        kb_listener.start()
+        ms_listener.start()
+
+        while self._hotkey_captured is None:
+            QApplication.processEvents()
+
+        kb_listener.stop()
+        ms_listener.stop()
+        kb_listener.join(timeout=1)
+        ms_listener.join(timeout=1)
+
+        captured = self._hotkey_captured
+        self._hotkey_btn.setText(captured)
+        self._hotkey_btn.setStyleSheet('background:rgb(204,153,51); color: #e0e0e0; padding: 2px 8px;')
+        logging_helper.log_info(f'Captured hotkey: {captured}')
 
     def select_hp_pixel(self):
         selector = PointSelector()
@@ -692,7 +713,9 @@ class Toolbox(QDialog):
             self._find_and_set(f'skill_{key}_w', str(vals[2] if len(vals) >= 3 else 60))
             self._find_and_set(f'skill_{key}_h', str(vals[3] if len(vals) >= 4 else 60))
 
-        self._find_and_set('rotation_hotkey', str(config_helper.get_shared_config('rotation_hotkey', 'f6')))
+        hotkey_val = config_helper.get_shared_config('rotation_hotkey', 'f6')
+        if hasattr(self, '_hotkey_btn'):
+            self._hotkey_btn.setText(str(hotkey_val))
 
         logging_helper.log_info(f'Loaded config values into fields for class: {current_class}')
 
@@ -723,9 +746,8 @@ class Toolbox(QDialog):
             cb = self.configBox.findChild(QCheckBox, f'skill_{key}_enabled')
             config_helper.save_class_config(current_class, f'{key}_enabled', cb.isChecked() if cb else True)
 
-        hotkey_le = self.configBox.findChild(QLineEdit, 'rotation_hotkey')
-        if hotkey_le and hotkey_le.text():
-            config_helper.save_shared_config('rotation_hotkey', hotkey_le.text())
+        if hasattr(self, '_hotkey_btn') and self._hotkey_btn.text():
+            config_helper.save_shared_config('rotation_hotkey', self._hotkey_btn.text())
 
         logging_helper.log_info(f'Saved config values from fields for class: {current_class}')
         bot_config.init()
