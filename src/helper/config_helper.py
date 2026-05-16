@@ -66,27 +66,30 @@ def read_config() -> Dict[str, Any]:
         if _config_cache is not None and (now - _config_cache_time) < _CACHE_TTL:
             return _config_cache
 
-    config_path = Path(get_file_path())
-    if not config_path.exists():
-        raise ConfigError(f"Configuration file not found at: {config_path}")
+        config_path = Path(get_file_path())
+        if not config_path.exists():
+            raise ConfigError(f"Configuration file not found at: {config_path}")
 
-    try:
-        with open(config_path, 'r', encoding='utf8') as infile:
-            data = safe_load(infile) or {}
-            if not isinstance(data, dict):
-                logging_helper.log_debug(f"Config file parsed to {type(data).__name__}, coercing to dict.")
-                data = {}
-            if 'classes' not in data:
-                data = _migrate_to_nested(data)
-            with _config_cache_lock:
+        try:
+            with open(config_path, 'r', encoding='utf8') as infile:
+                data = safe_load(infile) or {}
+                if not isinstance(data, dict):
+                    logging_helper.log_debug(f"Config file parsed to {type(data).__name__}, coercing to dict.")
+                    data = {}
+                if 'classes' not in data:
+                    _config_cache_lock.release()
+                    try:
+                        data = _migrate_to_nested(data)
+                    finally:
+                        _config_cache_lock.acquire()
                 _config_cache = data
                 _config_cache_time = time.time()
-            return data
-    except ConfigError:
-        raise
-    except Exception as ex:
-        logging_helper.log_error(f"Failed to read config: {ex}")
-        raise ConfigError(f"Failed to read config: {ex}")
+                return data
+        except ConfigError:
+            raise
+        except Exception as ex:
+            logging_helper.log_error(f"Failed to read config: {ex}")
+            raise ConfigError(f"Failed to read config: {ex}")
 
 def write_config(data: Dict[str, Any]) -> None:
     global _config_cache, _config_cache_time
@@ -236,6 +239,27 @@ def save_config(item: str, value: Any) -> None:
 
     cfg[item] = value
     write_config(cfg)
+
+def batch_save(updates: Dict[str, Any], class_updates: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+    try:
+        data = read_config()
+    except ConfigError:
+        data = {}
+    if 'classes' not in data:
+        data = _migrate_to_nested(data)
+
+    for key, value in updates.items():
+        data[key] = value
+
+    if class_updates:
+        current_class = data.get('class', 'Paladin')
+        if current_class not in data.get('classes', {}):
+            data.setdefault('classes', {})[current_class] = {}
+        cls_cfg = data['classes'][current_class]
+        for key, value in class_updates.items():
+            cls_cfg[key] = value
+
+    write_config(data)
 
 def get_config_value(key: str, default: Any = None) -> Any:
     """

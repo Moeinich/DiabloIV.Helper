@@ -19,21 +19,21 @@ classes:
     skill6_pos: *id001
   Paladin:
     evade: space
-    evade_enabled: false
+    evade_enabled: true
     evade_pos:
     - 2079
     - 1192
     - 43
     - 49
-    pot: q
-    pot_enabled: false
+    pot: '2'
+    pot_enabled: true
     pot_pos:
     - 1310
     - 1191
     - 44
     - 49
     skill1: '1'
-    skill1_enabled: false
+    skill1_enabled: true
     skill1_pos:
     - 1471
     - 1299
@@ -68,7 +68,7 @@ classes:
     - 78
     - 82
     skill6: rightclick
-    skill6_enabled: false
+    skill6_enabled: true
     skill6_pos:
     - 1890
     - 1298

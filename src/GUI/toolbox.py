@@ -133,9 +133,10 @@ class LiveVisualizerWidget(QWidget):
         self._cached_cls_cfg = {}
         self._cached_hp_vals = None
         self._cast_tracker = None
+        self._last_config_read = 0.0
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._update_states)
-        self._refresh_timer.start(100)
+        self._refresh_timer.start(200)
 
     def _get_cast_tracker(self):
         if self._cast_tracker is None:
@@ -147,9 +148,13 @@ class LiveVisualizerWidget(QWidget):
         try:
             from bot.rotation import get_skill_states
             self._skill_states = get_skill_states()
-            self._cached_hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
-            current_class = config_helper.get_shared_config('class', 'Paladin')
-            self._cached_cls_cfg = config_helper.get_class_config(current_class)
+            import time as _time
+            now = _time.time()
+            if now - self._last_config_read >= 2.0:
+                self._last_config_read = now
+                self._cached_hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
+                current_class = config_helper.get_shared_config('class', 'Paladin')
+                self._cached_cls_cfg = config_helper.get_class_config(current_class)
         except Exception as ex:
             logging_helper.log_debug(f"LiveVisualizer._update_states error: {ex}")
         self.update()
@@ -726,28 +731,33 @@ class Toolbox(QDialog):
             le = self.configBox.findChild(QLineEdit, obj_name)
             return int(le.text()) if le and le.text() else None
 
-        hp_r = get_val('hp_r') or 95
-        hp_g = get_val('hp_g') or 10
-        hp_b = get_val('hp_b') or 15
-        config_helper.save_shared_config('hp_pixel', [get_val('hp_x') or 608, get_val('hp_y') or 980, [hp_r, hp_g, hp_b]])
-
         def get_key_val(obj_name):
             le = self.configBox.findChild(QLineEdit, obj_name)
             return le.text() if le and le.text() else None
 
+        hp_r = get_val('hp_r') or 95
+        hp_g = get_val('hp_g') or 10
+        hp_b = get_val('hp_b') or 15
+
+        shared_updates = {
+            'hp_pixel': [get_val('hp_x') or 608, get_val('hp_y') or 980, [hp_r, hp_g, hp_b]],
+        }
+        if hasattr(self, '_hotkey_btn') and self._hotkey_btn.text():
+            shared_updates['rotation_hotkey'] = self._hotkey_btn.text()
+
+        class_updates = {}
         for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
-            config_helper.save_class_config(current_class, key, get_key_val(f'skill_{key}_key'))
-            config_helper.save_class_config(current_class, f'{key}_pos', [
+            class_updates[key] = get_key_val(f'skill_{key}_key')
+            class_updates[f'{key}_pos'] = [
                 get_val(f'skill_{key}_x') or 0,
                 get_val(f'skill_{key}_y') or 0,
                 get_val(f'skill_{key}_w') or 60,
                 get_val(f'skill_{key}_h') or 60
-            ])
+            ]
             cb = self.configBox.findChild(QCheckBox, f'skill_{key}_enabled')
-            config_helper.save_class_config(current_class, f'{key}_enabled', cb.isChecked() if cb else True)
+            class_updates[f'{key}_enabled'] = cb.isChecked() if cb else True
 
-        if hasattr(self, '_hotkey_btn') and self._hotkey_btn.text():
-            config_helper.save_shared_config('rotation_hotkey', self._hotkey_btn.text())
+        config_helper.batch_save(shared_updates, {current_class: class_updates})
 
         logging_helper.log_info(f'Saved config values from fields for class: {current_class}')
         bot_config.init()
