@@ -115,10 +115,12 @@ def human_press(key: str) -> None:
 def _read_bars(c: bot_config.BotConfig) -> Tuple[float, float]:
     hp = 0.5
     try:
-        if c.hp_orb_center and c.hp_orb_radius and c.hp_orb_empty_color:
+        if c.hp_orb_center and c.hp_orb_radius and c.hp_orb_full_color:
+            fc = c.hp_orb_full_color
+            dc = c.hp_orb_dark_color or fc
             hp = image_helper.read_orb_fill_percentage(
                 c.hp_orb_center[0], c.hp_orb_center[1], c.hp_orb_radius,
-                c.hp_orb_empty_color[0], c.hp_orb_empty_color[1], c.hp_orb_empty_color[2],
+                fc[0], fc[1], fc[2], dc[0], dc[1], dc[2],
                 c.hp_orb_tolerance
             )
     except Exception as ex:
@@ -126,10 +128,12 @@ def _read_bars(c: bot_config.BotConfig) -> Tuple[float, float]:
 
     resource = 0.5
     try:
-        if c.resource_orb_center and c.resource_orb_radius and c.resource_orb_empty_color:
+        if c.resource_orb_center and c.resource_orb_radius and c.resource_orb_full_color:
+            fc = c.resource_orb_full_color
+            dc = c.resource_orb_dark_color or fc
             resource = image_helper.read_orb_fill_percentage(
                 c.resource_orb_center[0], c.resource_orb_center[1], c.resource_orb_radius,
-                c.resource_orb_empty_color[0], c.resource_orb_empty_color[1], c.resource_orb_empty_color[2],
+                fc[0], fc[1], fc[2], dc[0], dc[1], dc[2],
                 c.resource_orb_tolerance
             )
     except Exception as ex:
@@ -158,29 +162,24 @@ def _skill_conf(key: str) -> float:
 
 def _evaluate_skill(c: bot_config.BotConfig, key: str, hp_pct: float, resource_pct: float) -> bool:
     mode = c.skill_mode(key)
-    hp_checked = False
-    resource_checked = False
+    can_cast = True
 
     if mode == 'delay':
         dmax = c.skill_delay_max(key)
-        if dmax > 0:
-            if _skill_timers[key].get_timer_state() != TIMER_STOPPED:
-                return False
+        if dmax > 0 and _skill_timers[key].get_timer_state() != TIMER_STOPPED:
+            can_cast = False
     elif mode == 'hp_guard':
         if not (c.skill_hp_min(key) <= hp_pct <= c.skill_hp_max(key)):
-            return False
-        hp_checked = True
+            can_cast = False
     elif mode == 'resource_guard':
         if not (c.skill_resource_min(key) <= resource_pct <= c.skill_resource_max(key)):
-            return False
-        resource_checked = True
+            can_cast = False
 
-    if not hp_checked:
-        if not (c.skill_hp_min(key) <= hp_pct <= c.skill_hp_max(key)):
-            return False
-    if not resource_checked:
-        if not (c.skill_resource_min(key) <= resource_pct <= c.skill_resource_max(key)):
-            return False
+    if can_cast:
+        hp_ok = (c.skill_hp_min(key) <= hp_pct <= c.skill_hp_max(key))
+        res_ok = (c.skill_resource_min(key) <= resource_pct <= c.skill_resource_max(key))
+        if not hp_ok or not res_ok:
+            can_cast = False
 
     icon_idx = _icon_index(key)
     if icon_idx:
@@ -190,10 +189,11 @@ def _evaluate_skill(c: bot_config.BotConfig, key: str, hp_pct: float, resource_p
     elif key == 'evade':
         found = image_helper.locate_needle(str(SKILLPATH / 'evade.png'), conf=0.7, region=c.skill_region('evade'))
     else:
+        _record_skill_state(key, False, True, mode)
         return False
 
     _record_skill_state(key, bool(found), True, mode)
-    return bool(found)
+    return can_cast and bool(found)
 
 
 def _cast_skill(c: bot_config.BotConfig, key: str, delay_mult: float) -> bool:

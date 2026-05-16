@@ -1060,7 +1060,7 @@ classes:
 hp_orb_center:
 - 1253
 - 1321
-hp_orb_empty_color:
+hp_orb_full_color:
 - 119
 - 21
 - 27
@@ -1080,7 +1080,7 @@ region_detect:
 resource_orb_center:
 - 2186
 - 1322
-resource_orb_empty_color:
+resource_orb_full_color:
 - 62
 - 67
 - 69

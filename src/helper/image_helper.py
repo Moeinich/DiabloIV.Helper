@@ -352,7 +352,8 @@ def locate_needle(
 
 
 def read_orb_fill_percentage(center_x: int, center_y: int, radius: int,
-                             empty_r: int, empty_g: int, empty_b: int,
+                             full_r: int, full_g: int, full_b: int,
+                             dark_r: int, dark_g: int, dark_b: int,
                              tolerance: int = 45) -> float:
     if radius <= 0:
         logging_helper.log_debug("read_orb_fill_percentage: invalid radius")
@@ -363,8 +364,8 @@ def read_orb_fill_percentage(center_x: int, center_y: int, radius: int,
         diam = radius * 2
         img = ImageGrab.grab(bbox=(left, top, left + diam, top + diam))
         arr = np.array(img)
-        total_rows = 0
-        empty_rows = 0
+        total_pixels = 0
+        filled_pixels = 0
         r2 = radius * radius
         for row_y in range(diam):
             dy = row_y - radius
@@ -374,55 +375,34 @@ def read_orb_fill_percentage(center_x: int, center_y: int, radius: int,
             hw = int(hw_sq ** 0.5)
             if hw <= 0:
                 continue
-            total_rows += 1
             cx = radius
             row = arr[row_y, max(0, cx - hw):min(diam, cx + hw + 1)]
-            diffs_r = np.abs(row[:, 0].astype(int) - empty_r)
-            diffs_g = np.abs(row[:, 1].astype(int) - empty_g)
-            diffs_b = np.abs(row[:, 2].astype(int) - empty_b)
-            empty_mask = (diffs_r <= tolerance) & (diffs_g <= tolerance) & (diffs_b <= tolerance)
-            empty_ratio = np.sum(empty_mask) / len(row)
-            if empty_ratio > 0.5:
-                empty_rows += 1
-        if total_rows == 0:
+            if len(row) == 0:
+                continue
+            total_pixels += len(row)
+            r_vals = row[:, 0].astype(int)
+            g_vals = row[:, 1].astype(int)
+            b_vals = row[:, 2].astype(int)
+            bright_mask = ((np.abs(r_vals - full_r) <= tolerance) &
+                           (np.abs(g_vals - full_g) <= tolerance) &
+                           (np.abs(b_vals - full_b) <= tolerance))
+            dark_mask = ((np.abs(r_vals - dark_r) <= tolerance) &
+                         (np.abs(g_vals - dark_g) <= tolerance) &
+                         (np.abs(b_vals - dark_b) <= tolerance))
+            filled_pixels += np.sum(bright_mask | dark_mask)
+        if total_pixels == 0:
             return 0.5
-        return 1.0 - (empty_rows / total_rows)
+        return filled_pixels / total_pixels
     except Exception as ex:
         logging_helper.log_debug(f"read_orb_fill_percentage error: {ex}")
         return 0.5
 
 
-def sample_orb_empty_color(center_x: int, center_y: int, radius: int) -> Tuple[int, int, int]:
-    if radius <= 0:
-        return (0, 0, 0)
+def sample_pixel_color(x: int, y: int) -> Tuple[int, int, int]:
     try:
-        left = center_x - radius
-        top = center_y - radius
-        diam = radius * 2
-        img = ImageGrab.grab(bbox=(left, top, left + diam, top + diam))
-        arr = np.array(img)
-        r2 = radius * radius
-        sample_rows = []
-        bottom_start = int(diam * 0.8)
-        for row_y in range(bottom_start, diam):
-            dy = row_y - radius
-            hw_sq = r2 - (dy * dy)
-            if hw_sq < 0:
-                continue
-            hw = int(hw_sq ** 0.5)
-            if hw <= 0:
-                continue
-            cx = radius
-            row = arr[row_y, max(0, cx - hw):min(diam, cx + hw + 1)]
-            if len(row) > 0:
-                sample_rows.append(row)
-        if not sample_rows:
-            return (0, 0, 0)
-        all_pixels = np.concatenate(sample_rows, axis=0)
-        avg_r = int(np.mean(all_pixels[:, 0]))
-        avg_g = int(np.mean(all_pixels[:, 1]))
-        avg_b = int(np.mean(all_pixels[:, 2]))
-        return (avg_r, avg_g, avg_b)
+        img = ImageGrab.grab(bbox=(x, y, x + 1, y + 1))
+        px = img.getpixel((0, 0))
+        return (px[0], px[1], px[2])
     except Exception as ex:
-        logging_helper.log_debug(f"sample_orb_empty_color error: {ex}")
+        logging_helper.log_debug(f"sample_pixel_color error: {ex}")
         return (0, 0, 0)

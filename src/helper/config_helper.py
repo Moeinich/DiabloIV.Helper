@@ -32,8 +32,8 @@ for _slot in SKILL_SLOTS:
 
 SHARED_KEYS = [
     'apptitle', 'class', 'rotation_hotkey',
-    'hp_orb_center', 'hp_orb_radius', 'hp_orb_empty_color', 'hp_orb_tolerance',
-    'resource_orb_center', 'resource_orb_radius', 'resource_orb_empty_color', 'resource_orb_tolerance',
+    'hp_orb_center', 'hp_orb_radius', 'hp_orb_full_color', 'hp_orb_dark_color', 'hp_orb_tolerance',
+    'resource_orb_center', 'resource_orb_radius', 'resource_orb_full_color', 'resource_orb_dark_color', 'resource_orb_tolerance',
     'region_detect',
 ]
 
@@ -91,6 +91,7 @@ def read_config() -> Dict[str, Any]:
                     finally:
                         _config_cache_lock.acquire()
                 else:
+                    data = _migrate_color_keys(data)
                     data = _ensure_macro_defaults(data)
                     if data.get('_needs_write'):
                         del data['_needs_write']
@@ -209,6 +210,20 @@ _SHARED_MACRO_DEFAULTS = {
     'resource_min': 0, 'resource_max': 100,
     'chain_next': '', 'chain_delay': 0.1,
 }
+
+def _migrate_color_keys(data: Dict[str, Any]) -> Dict[str, Any]:
+    renames = {
+        'hp_orb_empty_color': 'hp_orb_full_color',
+        'resource_orb_empty_color': 'resource_orb_full_color',
+    }
+    changed = False
+    for old_key, new_key in renames.items():
+        if old_key in data and new_key not in data:
+            data[new_key] = data.pop(old_key)
+            changed = True
+    if changed:
+        data['_needs_write'] = True
+    return data
 
 def _ensure_macro_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
     if 'classes' not in data:

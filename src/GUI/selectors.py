@@ -436,3 +436,120 @@ class CircleDragSelector(BaseDragSelector):
         if self.result_center is not None:
             return self.result_center, self.result_radius
         return None
+
+
+class ColorPickerOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setGeometry(QApplication.primaryScreen().geometry())
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CrossCursor)
+        self._mouse_pos = QPoint(0, 0)
+        self._clicks = []
+        self._result = None
+        self._done = False
+        self._prompt = "Click the BRIGHT area of the orb"
+
+    def run(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.grabMouse()
+        self.grabKeyboard()
+        from PyQt5.QtWidgets import QEventLoop
+        loop = QEventLoop()
+        while not self._done:
+            loop.processEvents()
+        self.releaseMouse()
+        self.releaseKeyboard()
+        self.close()
+        return self._result
+
+    def _sample_color_at(self, pos):
+        try:
+            from PIL import ImageGrab
+            img = ImageGrab.grab(bbox=(pos.x(), pos.y(), pos.x() + 1, pos.y() + 1))
+            px = img.getpixel((0, 0))
+            return (px[0], px[1], px[2])
+        except Exception:
+            return None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            color = self._sample_color_at(event.pos())
+            if color is None:
+                return
+            self._clicks.append({'pos': event.pos(), 'color': color})
+            if len(self._clicks) == 1:
+                self._prompt = "Click the DARKER area of the orb"
+            elif len(self._clicks) >= 2:
+                self._result = (self._clicks[0]['color'], self._clicks[1]['color'])
+                self._done = True
+        elif event.button() == Qt.RightButton:
+            if self._clicks:
+                self._clicks.pop()
+                self._prompt = "Click the BRIGHT area of the orb" if not self._clicks else "Click the DARKER area of the orb"
+
+    def mouseMoveEvent(self, event):
+        self._mouse_pos = event.pos()
+        self.update()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self._result = None
+            self._done = True
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 40))
+        pos = self._mouse_pos
+        mag_size = 80
+        mag_half = mag_size // 2
+        zoom = 6
+        try:
+            from PIL import ImageGrab
+            grab_size = mag_size // zoom
+            ghalf = grab_size // 2
+            img = ImageGrab.grab(bbox=(pos.x() - ghalf, pos.y() - ghalf, pos.x() + ghalf, pos.y() + ghalf))
+            from PyQt5.QtGui import QImage
+            data = img.tobytes("raw", "RGB")
+            qimg = QImage(data, img.width, img.height, QImage.Format_RGB888)
+            mag_x = pos.x() + 20
+            mag_y = pos.y() - mag_size - 10
+            screen = self.rect()
+            if mag_x + mag_size > screen.width():
+                mag_x = pos.x() - mag_size - 20
+            if mag_y < 0:
+                mag_y = pos.y() + 20
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
+            painter.drawRect(mag_x - 1, mag_y - 1, mag_size + 2, mag_size + 2)
+            painter.drawImage(QRect(mag_x, mag_y, mag_size, mag_size), qimg)
+            center_px = mag_x + mag_half
+            center_py = mag_y + mag_half
+            painter.setPen(QPen(QColor(255, 255, 0), 1))
+            painter.drawLine(center_px - 8, center_py, center_px + 8, center_py)
+            painter.drawLine(center_px, center_py - 8, center_px, center_py + 8)
+        except Exception:
+            pass
+        swatch_size = 24
+        swatch_x = pos.x() + 20
+        swatch_y = pos.y() + 20
+        if swatch_x + swatch_size + 60 > screen.width():
+            swatch_x = pos.x() - swatch_size - 80
+        for i, click in enumerate(self._clicks):
+            c = click['color']
+            painter.setPen(QPen(QColor(255, 255, 255), 1))
+            painter.setBrush(QColor(c[0], c[1], c[2]))
+            painter.drawRect(swatch_x, swatch_y + i * (swatch_size + 4), swatch_size, swatch_size)
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(swatch_x + swatch_size + 6, swatch_y + i * (swatch_size + 4) + 16,
+                             f"R:{c[0]} G:{c[1]} B:{c[2]}")
+        painter.setPen(QColor(0, 255, 100))
+        painter.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        painter.drawText(20, self.height() - 40, self._prompt)
+        painter.setPen(QColor(200, 200, 200))
+        painter.setFont(QFont("Segoe UI", 10))
+        painter.drawText(20, self.height() - 18, "Left click: pick color | Right click: undo | ESC: cancel")

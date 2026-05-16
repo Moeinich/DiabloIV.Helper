@@ -58,8 +58,8 @@ class LiveVisualizerWidget(QWidget):
             if now - self._last_config_read >= 2.0:
                 self._last_config_read = now
                 shared = {}
-                for k in ('hp_orb_center', 'hp_orb_radius', 'hp_orb_empty_color', 'hp_orb_tolerance',
-                          'resource_orb_center', 'resource_orb_radius', 'resource_orb_empty_color', 'resource_orb_tolerance'):
+                for k in ('hp_orb_center', 'hp_orb_radius', 'hp_orb_full_color', 'hp_orb_dark_color', 'hp_orb_tolerance',
+                          'resource_orb_center', 'resource_orb_radius', 'resource_orb_full_color', 'resource_orb_dark_color', 'resource_orb_tolerance'):
                     shared[k] = config_helper.get_shared_config(k)
                 self._cached_shared = shared
                 current_class = config_helper.get_current_class()
@@ -75,23 +75,27 @@ class LiveVisualizerWidget(QWidget):
         shared = self._cached_shared
         hp_center = shared.get('hp_orb_center')
         hp_radius = shared.get('hp_orb_radius') or 0
-        hp_empty_color = shared.get('hp_orb_empty_color')
+        hp_full_color = shared.get('hp_orb_full_color')
+        hp_dark_color = shared.get('hp_orb_dark_color')
         hp_tolerance = shared.get('hp_orb_tolerance') or 45
-        if hp_center and hp_radius > 0 and hp_empty_color:
+        if hp_center and hp_radius > 0 and hp_full_color:
             cx, cy = hp_center if isinstance(hp_center, (list, tuple)) else (hp_center[0], hp_center[1])
-            er, eg, eb = hp_empty_color if isinstance(hp_empty_color, (list, tuple)) else (hp_empty_color[0], hp_empty_color[1], hp_empty_color[2])
-            fill = image_helper.read_orb_fill_percentage(cx, cy, hp_radius, er, eg, eb, hp_tolerance)
+            fc = hp_full_color if isinstance(hp_full_color, (list, tuple)) else (hp_full_color[0], hp_full_color[1], hp_full_color[2])
+            dc = hp_dark_color if hp_dark_color and isinstance(hp_dark_color, (list, tuple)) else fc
+            fill = image_helper.read_orb_fill_percentage(cx, cy, hp_radius, fc[0], fc[1], fc[2], dc[0], dc[1], dc[2], hp_tolerance)
             hp_color = QColor(int(255 * (1 - fill)), int(255 * fill), 0)
             self._draw_orb_indicator(painter, cx, cy, hp_radius, hp_color, f"HP {int(fill * 100)}%")
 
         res_center = shared.get('resource_orb_center')
         res_radius = shared.get('resource_orb_radius') or 0
-        res_empty_color = shared.get('resource_orb_empty_color')
+        res_full_color = shared.get('resource_orb_full_color')
+        res_dark_color = shared.get('resource_orb_dark_color')
         res_tolerance = shared.get('resource_orb_tolerance') or 45
-        if res_center and res_radius > 0 and res_empty_color:
+        if res_center and res_radius > 0 and res_full_color:
             cx, cy = res_center if isinstance(res_center, (list, tuple)) else (res_center[0], res_center[1])
-            er, eg, eb = res_empty_color if isinstance(res_empty_color, (list, tuple)) else (res_empty_color[0], res_empty_color[1], res_empty_color[2])
-            fill = image_helper.read_orb_fill_percentage(cx, cy, res_radius, er, eg, eb, res_tolerance)
+            fc = res_full_color if isinstance(res_full_color, (list, tuple)) else (res_full_color[0], res_full_color[1], res_full_color[2])
+            dc = res_dark_color if res_dark_color and isinstance(res_dark_color, (list, tuple)) else fc
+            fill = image_helper.read_orb_fill_percentage(cx, cy, res_radius, fc[0], fc[1], fc[2], dc[0], dc[1], dc[2], res_tolerance)
             res_color = QColor(0, int(200 * fill), int(255 * fill))
             self._draw_orb_indicator(painter, cx, cy, res_radius, res_color, f"RES {int(fill * 100)}%")
 
@@ -546,30 +550,44 @@ class Toolbox(QDialog):
         vbox.addLayout(row_center)
 
         row_color = QHBoxLayout()
-        row_color.addWidget(QLabel("Empty Color R:"))
-        er = QSpinBox()
-        er.setRange(0, 255)
-        er.setObjectName(f'{prefix}_empty_r')
-        row_color.addWidget(er)
+        row_color.addWidget(QLabel("Full Color R:"))
+        fr = QSpinBox()
+        fr.setRange(0, 255)
+        fr.setObjectName(f'{prefix}_full_r')
+        row_color.addWidget(fr)
         row_color.addWidget(QLabel("G:"))
-        eg = QSpinBox()
-        eg.setRange(0, 255)
-        eg.setObjectName(f'{prefix}_empty_g')
-        row_color.addWidget(eg)
+        fg = QSpinBox()
+        fg.setRange(0, 255)
+        fg.setObjectName(f'{prefix}_full_g')
+        row_color.addWidget(fg)
         row_color.addWidget(QLabel("B:"))
-        eb = QSpinBox()
-        eb.setRange(0, 255)
-        eb.setObjectName(f'{prefix}_empty_b')
-        row_color.addWidget(eb)
+        fb = QSpinBox()
+        fb.setRange(0, 255)
+        fb.setObjectName(f'{prefix}_full_b')
+        row_color.addWidget(fb)
+        row_color.addWidget(QLabel("  Dark R:"))
+        dr = QSpinBox()
+        dr.setRange(0, 255)
+        dr.setObjectName(f'{prefix}_dark_r')
+        row_color.addWidget(dr)
+        row_color.addWidget(QLabel("G:"))
+        dg = QSpinBox()
+        dg.setRange(0, 255)
+        dg.setObjectName(f'{prefix}_dark_g')
+        row_color.addWidget(dg)
+        row_color.addWidget(QLabel("B:"))
+        db = QSpinBox()
+        db.setRange(0, 255)
+        db.setObjectName(f'{prefix}_dark_b')
+        row_color.addWidget(db)
         row_color.addWidget(QLabel("Tol:"))
         tol = QSpinBox()
         tol.setRange(0, 100)
         tol.setObjectName(f'{prefix}_tolerance')
         row_color.addWidget(tol)
-        sample_btn = QPushButton("SAMPLE EMPTY COLOR")
-        sample_btn.orb_type = orb_type
-        sample_btn.clicked.connect(lambda checked, t=orb_type: self.sample_empty_color(t))
-        row_color.addWidget(sample_btn)
+        pick_btn = QPushButton("PICK COLORS")
+        pick_btn.clicked.connect(lambda checked, t=orb_type: self.pick_orb_colors(t))
+        row_color.addWidget(pick_btn)
         row_color.addStretch()
         vbox.addLayout(row_color)
 
@@ -676,39 +694,43 @@ class Toolbox(QDialog):
             self._find_spin_set(f'{prefix}_orb_radius', radius)
             logging_helper.log_info(f"Selected {orb_type} orb at {center.x()},{center.y()} r={radius}")
 
-    def sample_empty_color(self, orb_type):
+    def pick_orb_colors(self, orb_type):
+        from GUI.selectors import ColorPickerOverlay
+        picker = ColorPickerOverlay()
+        result = picker.run()
+        if result is None:
+            return
+        bright, dark = result
         prefix = orb_type
-        cx_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_x')
-        cy_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_y')
-        rad_sp = self.findChild(QSpinBox, f'{prefix}_orb_radius')
-        if not cx_sp or not cy_sp or not rad_sp:
-            return
-        cx_val = cx_sp.value()
-        cy_val = cy_sp.value()
-        rad_val = rad_sp.value()
-        if rad_val <= 0:
-            logging_helper.log_debug(f"Cannot sample {orb_type} orb: radius is 0")
-            return
-        r, g, b = image_helper.sample_orb_empty_color(cx_val, cy_val, rad_val)
-        self._find_spin_set(f'{prefix}_empty_r', r)
-        self._find_spin_set(f'{prefix}_empty_g', g)
-        self._find_spin_set(f'{prefix}_empty_b', b)
-        logging_helper.log_info(f"Sampled {orb_type} orb empty color: ({r},{g},{b})")
+        self._find_spin_set(f'{prefix}_full_r', bright[0])
+        self._find_spin_set(f'{prefix}_full_g', bright[1])
+        self._find_spin_set(f'{prefix}_full_b', bright[2])
+        self._find_spin_set(f'{prefix}_dark_r', dark[0])
+        self._find_spin_set(f'{prefix}_dark_g', dark[1])
+        self._find_spin_set(f'{prefix}_dark_b', dark[2])
+        logging_helper.log_info(f"Picked {orb_type} orb colors: bright=({bright[0]},{bright[1]},{bright[2]}) dark=({dark[0]},{dark[1]},{dark[2]})")
 
     def test_orb(self, orb_type):
         prefix = orb_type
         cx_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_x')
         cy_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_y')
         rad_sp = self.findChild(QSpinBox, f'{prefix}_orb_radius')
-        er_sp = self.findChild(QSpinBox, f'{prefix}_empty_r')
-        eg_sp = self.findChild(QSpinBox, f'{prefix}_empty_g')
-        eb_sp = self.findChild(QSpinBox, f'{prefix}_empty_b')
+        fr_sp = self.findChild(QSpinBox, f'{prefix}_full_r')
+        fg_sp = self.findChild(QSpinBox, f'{prefix}_full_g')
+        fb_sp = self.findChild(QSpinBox, f'{prefix}_full_b')
+        dr_sp = self.findChild(QSpinBox, f'{prefix}_dark_r')
+        dg_sp = self.findChild(QSpinBox, f'{prefix}_dark_g')
+        db_sp = self.findChild(QSpinBox, f'{prefix}_dark_b')
         tol_sp = self.findChild(QSpinBox, f'{prefix}_tolerance')
-        if not all([cx_sp, cy_sp, rad_sp, er_sp, eg_sp, eb_sp]):
+        if not all([cx_sp, cy_sp, rad_sp, fr_sp, fg_sp, fb_sp]):
             return
+        fr, fg, fb = fr_sp.value(), fg_sp.value(), fb_sp.value()
+        dr_val = dr_sp.value() if dr_sp else fr
+        dg_val = dg_sp.value() if dg_sp else fg
+        db_val = db_sp.value() if db_sp else fb
         fill = image_helper.read_orb_fill_percentage(
             cx_sp.value(), cy_sp.value(), rad_sp.value(),
-            er_sp.value(), eg_sp.value(), eb_sp.value(),
+            fr, fg, fb, dr_val, dg_val, db_val,
             tol_sp.value() if tol_sp else 45
         )
         fill_bar = self.findChild(_OrbFillBar, f'{prefix}_fill_bar')
@@ -844,12 +866,18 @@ class Toolbox(QDialog):
         hp_radius = config_helper.get_shared_config('hp_orb_radius')
         if hp_radius is not None:
             self._find_spin_set('hp_orb_radius', hp_radius)
-        hp_empty_color = config_helper.get_shared_config('hp_orb_empty_color')
-        if hp_empty_color:
-            r, g, b = hp_empty_color if isinstance(hp_empty_color, (list, tuple)) else (hp_empty_color[0], hp_empty_color[1], hp_empty_color[2])
-            self._find_spin_set('hp_empty_r', r)
-            self._find_spin_set('hp_empty_g', g)
-            self._find_spin_set('hp_empty_b', b)
+        hp_full_color = config_helper.get_shared_config('hp_orb_full_color')
+        if hp_full_color:
+            r, g, b = hp_full_color if isinstance(hp_full_color, (list, tuple)) else (hp_full_color[0], hp_full_color[1], hp_full_color[2])
+            self._find_spin_set('hp_full_r', r)
+            self._find_spin_set('hp_full_g', g)
+            self._find_spin_set('hp_full_b', b)
+        hp_dark_color = config_helper.get_shared_config('hp_orb_dark_color')
+        if hp_dark_color:
+            r, g, b = hp_dark_color if isinstance(hp_dark_color, (list, tuple)) else (hp_dark_color[0], hp_dark_color[1], hp_dark_color[2])
+            self._find_spin_set('hp_dark_r', r)
+            self._find_spin_set('hp_dark_g', g)
+            self._find_spin_set('hp_dark_b', b)
         hp_tolerance = config_helper.get_shared_config('hp_orb_tolerance')
         if hp_tolerance is not None:
             self._find_spin_set('hp_tolerance', hp_tolerance)
@@ -862,12 +890,18 @@ class Toolbox(QDialog):
         res_radius = config_helper.get_shared_config('resource_orb_radius')
         if res_radius is not None:
             self._find_spin_set('resource_orb_radius', res_radius)
-        res_empty_color = config_helper.get_shared_config('resource_orb_empty_color')
-        if res_empty_color:
-            r, g, b = res_empty_color if isinstance(res_empty_color, (list, tuple)) else (res_empty_color[0], res_empty_color[1], res_empty_color[2])
-            self._find_spin_set('resource_empty_r', r)
-            self._find_spin_set('resource_empty_g', g)
-            self._find_spin_set('resource_empty_b', b)
+        res_full_color = config_helper.get_shared_config('resource_orb_full_color')
+        if res_full_color:
+            r, g, b = res_full_color if isinstance(res_full_color, (list, tuple)) else (res_full_color[0], res_full_color[1], res_full_color[2])
+            self._find_spin_set('resource_full_r', r)
+            self._find_spin_set('resource_full_g', g)
+            self._find_spin_set('resource_full_b', b)
+        res_dark_color = config_helper.get_shared_config('resource_orb_dark_color')
+        if res_dark_color:
+            r, g, b = res_dark_color if isinstance(res_dark_color, (list, tuple)) else (res_dark_color[0], res_dark_color[1], res_dark_color[2])
+            self._find_spin_set('resource_dark_r', r)
+            self._find_spin_set('resource_dark_g', g)
+            self._find_spin_set('resource_dark_b', b)
         res_tolerance = config_helper.get_shared_config('resource_orb_tolerance')
         if res_tolerance is not None:
             self._find_spin_set('resource_tolerance', res_tolerance)
@@ -899,22 +933,26 @@ class Toolbox(QDialog):
 
         hp_center = [_sv('hp_orb_center_x'), _sv('hp_orb_center_y')]
         hp_radius = _sv('hp_orb_radius')
-        hp_empty_color = [_sv('hp_empty_r'), _sv('hp_empty_g'), _sv('hp_empty_b')]
+        hp_full_color = [_sv('hp_full_r'), _sv('hp_full_g'), _sv('hp_full_b')]
+        hp_dark_color = [_sv('hp_dark_r'), _sv('hp_dark_g'), _sv('hp_dark_b')]
         hp_tolerance = _sv('hp_tolerance', 45)
 
         res_center = [_sv('resource_orb_center_x'), _sv('resource_orb_center_y')]
         res_radius = _sv('resource_orb_radius')
-        res_empty_color = [_sv('resource_empty_r'), _sv('resource_empty_g'), _sv('resource_empty_b')]
+        res_full_color = [_sv('resource_full_r'), _sv('resource_full_g'), _sv('resource_full_b')]
+        res_dark_color = [_sv('resource_dark_r'), _sv('resource_dark_g'), _sv('resource_dark_b')]
         res_tolerance = _sv('resource_tolerance', 45)
 
         shared_updates = {
             'hp_orb_center': hp_center,
             'hp_orb_radius': hp_radius,
-            'hp_orb_empty_color': hp_empty_color,
+            'hp_orb_full_color': hp_full_color,
+            'hp_orb_dark_color': hp_dark_color,
             'hp_orb_tolerance': hp_tolerance,
             'resource_orb_center': res_center,
             'resource_orb_radius': res_radius,
-            'resource_orb_empty_color': res_empty_color,
+            'resource_orb_full_color': res_full_color,
+            'resource_orb_dark_color': res_dark_color,
             'resource_orb_tolerance': res_tolerance,
         }
         if hasattr(self, '_hotkey_btn') and self._hotkey_btn.text():

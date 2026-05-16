@@ -16,8 +16,8 @@ _PER_SLOT_ATTRS = ['key', 'enabled', 'pos', 'mode', 'priority',
                    'delay_min', 'delay_max', 'hp_min', 'hp_max',
                    'resource_min', 'resource_max', 'chain_next', 'chain_delay']
 
-_ORB_ATTRS = ['hp_orb_center', 'hp_orb_radius', 'hp_orb_empty_color', 'hp_orb_tolerance',
-              'resource_orb_center', 'resource_orb_radius', 'resource_orb_empty_color', 'resource_orb_tolerance']
+_ORB_ATTRS = ['hp_orb_center', 'hp_orb_radius', 'hp_orb_full_color', 'hp_orb_dark_color', 'hp_orb_tolerance',
+              'resource_orb_center', 'resource_orb_radius', 'resource_orb_full_color', 'resource_orb_dark_color', 'resource_orb_tolerance']
 
 
 def _build_slots():
@@ -123,11 +123,13 @@ def init():
 
     c.hp_orb_center = cfg.get('hp_orb_center')
     c.hp_orb_radius = cfg.get('hp_orb_radius')
-    c.hp_orb_empty_color = cfg.get('hp_orb_empty_color')
+    c.hp_orb_full_color = cfg.get('hp_orb_full_color')
+    c.hp_orb_dark_color = cfg.get('hp_orb_dark_color')
     c.hp_orb_tolerance = cfg.get('hp_orb_tolerance', 45)
     c.resource_orb_center = cfg.get('resource_orb_center')
     c.resource_orb_radius = cfg.get('resource_orb_radius')
-    c.resource_orb_empty_color = cfg.get('resource_orb_empty_color')
+    c.resource_orb_full_color = cfg.get('resource_orb_full_color')
+    c.resource_orb_dark_color = cfg.get('resource_orb_dark_color')
     c.resource_orb_tolerance = cfg.get('resource_orb_tolerance', 45)
     c.rotation_hotkey = cfg.get('rotation_hotkey', 'f6')
 
