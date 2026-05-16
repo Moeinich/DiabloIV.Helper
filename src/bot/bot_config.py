@@ -77,13 +77,38 @@ def init():
 
     cls_cfg = config_helper.get_class_config(class_name)
 
+    all_positions = []
     for key in ('skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade'):
         setattr(c, f'{key}_key', cls_cfg.get(key, ''))
         setattr(c, f'{key}_enabled', cls_cfg.get(f'{key}_enabled', True))
-        setattr(c, f'{key}_pos', cls_cfg.get(f'{key}_pos'))
+        pos = cls_cfg.get(f'{key}_pos')
+        setattr(c, f'{key}_pos', pos)
+        if pos and isinstance(pos, (list, tuple)) and len(pos) >= 4:
+            all_positions.append(pos)
 
     c.hp_pixel = cfg.get('hp_pixel', (608, 980, [[95, 10, 15], [148, 14, 24], [97, 29, 82]]))
     c.rotation_hotkey = cfg.get('rotation_hotkey', 'f6')
+
+    if all_positions:
+        min_x = min(p[0] for p in all_positions) - 20
+        min_y = min(p[1] for p in all_positions) - 20
+        max_x = max(p[0] + p[2] for p in all_positions) + 20
+        max_y = max(p[1] + p[3] for p in all_positions) + 20
+        try:
+            from helper import image_helper
+            image_helper.set_skill_bar_region((min_x, min_y, max_x, max_y))
+        except Exception:
+            pass
+
+    try:
+        from helper import image_helper
+        for idx in ('01', '02', '03', '04', '05', '06'):
+            icon_path = str(SKILLPATH / c.class_lower / (idx + '.png'))
+            image_helper._get_needle_image(icon_path)
+        image_helper._get_needle_image(str(SKILLPATH / 'pot.png'))
+        image_helper._get_needle_image(str(SKILLPATH / 'evade.png'))
+    except Exception:
+        pass
 
     with _cache_lock:
         _cache = c

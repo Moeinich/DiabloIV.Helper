@@ -11,7 +11,9 @@ from math import sqrt
 from helper import mouse_helper, logging_helper
 
 _needle_cache = {}
+_needle_gray_cache = {}
 
+_skill_bar_bbox = None
 _screenshot_cache = None
 _screenshot_cache_time = 0.0
 _SCREENSHOT_CACHE_TTL = 0.05
@@ -20,10 +22,30 @@ _SCREENSHOT_CACHE_TTL = 0.05
 def _get_needle_image(path: str):
     if path not in _needle_cache:
         try:
-            _needle_cache[path] = Image.open(path)
+            img = Image.open(path).convert('RGB')
+            _needle_cache[path] = img
+            arr = np.array(img)
+            gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+            _needle_gray_cache[path] = gray
         except Exception:
             return None
     return _needle_cache[path]
+
+
+def _get_needle_gray(path: str):
+    if path not in _needle_gray_cache:
+        _get_needle_image(path)
+    return _needle_gray_cache.get(path)
+
+
+def set_skill_bar_region(bbox):
+    global _skill_bar_bbox
+    _skill_bar_bbox = bbox
+    clear_screenshot_cache()
+
+
+def get_skill_bar_region():
+    return _skill_bar_bbox
 
 
 def clear_needle_cache():
@@ -43,7 +65,10 @@ def _get_screenshot(region=None):
         return _screenshot_cache
     if region is not None:
         return ImageGrab.grab(bbox=region)
-    img = ImageGrab.grab()
+    if _skill_bar_bbox is not None:
+        img = ImageGrab.grab(bbox=_skill_bar_bbox)
+    else:
+        img = ImageGrab.grab()
     _screenshot_cache = img
     _screenshot_cache_time = now
     return img
@@ -272,10 +297,24 @@ def locate_needle(
             needle_img = _get_needle_image(needle)
             if needle_img is None:
                 return False
+            needle_gray = _get_needle_gray(needle)
             haystack_img = _get_screenshot()
             if region is not None:
                 left, top, rw, rh = region
-                haystack_img = haystack_img.crop((left, top, left + rw, top + rh))
+                offset_x = _skill_bar_bbox[0] if _skill_bar_bbox else 0
+                offset_y = _skill_bar_bbox[1] if _skill_bar_bbox else 0
+                haystack_img = haystack_img.crop((left - offset_x, top - offset_y, left - offset_x + rw, top - offset_y + rh))
+            if needle_gray is not None:
+                hay_arr = np.array(haystack_img)
+                hay_gray = cv2.cvtColor(hay_arr, cv2.COLOR_RGB2GRAY)
+                n_h, n_w = needle_gray.shape
+                result = cv2.matchTemplate(hay_gray, needle_gray, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(result)
+                if max_val >= conf:
+                    log_result(True, "'l' image (cv2)", f"conf={max_val:.3f}")
+                    return True
+                log_result(False, "'l' image (cv2)", f"best={max_val:.3f}")
+                return False
             res = pyautogui.locate(needle_img, haystack_img, confidence=conf, grayscale=grayscale)
             if res:
                 log_result(True, "'l' image", res)
