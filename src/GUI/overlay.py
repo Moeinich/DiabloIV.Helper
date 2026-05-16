@@ -12,10 +12,10 @@ from bot import rotation, bot_config
 from GUI import toolbox
 from pynput import mouse as pynput_mouse
 
-WINDOW_X = 50
-WINDOW_Y = 200
-WINDOW_WIDTH = 200
-WINDOW_HEIGHT = 175
+WINDOW_X = 660
+WINDOW_Y = 0
+WINDOW_WIDTH = 600
+WINDOW_HEIGHT = 40
 ICON_PATH = './assets/layout/mmorpg_helper.ico'
 
 DARK_STYLE = """
@@ -29,7 +29,7 @@ DARK_STYLE = """
         color: #e0e0e0;
         border: 1px solid rgba(80, 80, 100, 150);
         border-radius: 4px;
-        padding: 6px 16px;
+        padding: 3px 12px;
         font-weight: bold;
     }
     QPushButton:hover {
@@ -43,7 +43,7 @@ DARK_STYLE = """
         color: #e0e0e0;
         border: 1px solid rgba(80, 80, 100, 150);
         border-radius: 4px;
-        padding: 4px 12px;
+        padding: 2px 8px;
     }
     QComboBox::drop-down {
         border: none;
@@ -97,13 +97,13 @@ class Overlay(QMainWindow):
         self.createStartBox()
         self.createToolBox()
 
-        mainLayout = QVBoxLayout()
-        mainLayout.setContentsMargins(6, 6, 6, 6)
-        mainLayout.setSpacing(6)
+        mainLayout = QHBoxLayout()
+        mainLayout.setContentsMargins(8, 4, 8, 4)
+        mainLayout.setSpacing(8)
         mainLayout.addWidget(self.dropdownBox)
         mainLayout.addWidget(self.startBox)
-        mainLayout.addWidget(self.toolBox)
         mainLayout.addStretch(1)
+        mainLayout.addWidget(self.toolBox)
         self.setCentralWidget(visible_window)
         visible_window.setLayout(mainLayout)
 
@@ -170,7 +170,8 @@ class Overlay(QMainWindow):
         self.dropdownBox = QGroupBox()
         self.dropdownBox.setStyleSheet("QGroupBox { border: none; background: transparent; }")
         layout = QHBoxLayout()
-        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
 
         self.model = QStandardItemModel()
         self.ComboBox = QComboBox()
@@ -180,7 +181,6 @@ class Overlay(QMainWindow):
         self.ComboBox.activated.connect(self.passCurrentText)
 
         layout.addWidget(self.ComboBox)
-        layout.addStretch(1)
         self.dropdownBox.setLayout(layout)
 
     def closeEvent(self, event):
@@ -196,24 +196,25 @@ class Overlay(QMainWindow):
         self.startBox = QGroupBox()
         self.startBox.setStyleSheet("QGroupBox { border: none; background: transparent; }")
         layout = QHBoxLayout()
-        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
         self.toggleButton = QPushButton("START")
         self.toggleButton.clicked.connect(self.toggle_rotation)
 
         self.statusLabel = QLabel("OFF")
-        self.statusLabel.setStyleSheet('color: #ff4444; font-weight: bold; font-size: 13px;')
+        self.statusLabel.setStyleSheet('color: #ff4444; font-weight: bold; font-size: 12px;')
 
         layout.addWidget(self.toggleButton)
         layout.addWidget(self.statusLabel)
-        layout.addStretch(1)
         self.startBox.setLayout(layout)
 
     def createToolBox(self):
         self.toolBox = QGroupBox()
         self.toolBox.setStyleSheet("QGroupBox { border: none; background: transparent; }")
         layout = QHBoxLayout()
-        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
 
         toggleToolButton = QPushButton("TOOLBOX")
         toggleToolButton.clicked.connect(self.littlehelper_toolbox)
@@ -226,7 +227,7 @@ class Overlay(QMainWindow):
                 color: #e0e0e0;
                 border: 1px solid rgba(80, 80, 100, 150);
                 border-radius: 4px;
-                padding: 6px 16px;
+                padding: 4px 12px;
                 font-weight: bold;
             }
             QPushButton:checked {
@@ -238,7 +239,6 @@ class Overlay(QMainWindow):
 
         layout.addWidget(toggleToolButton)
         layout.addWidget(self.liveVizButton)
-        layout.addStretch(1)
         self.toolBox.setLayout(layout)
 
     def on_press(self, key):
