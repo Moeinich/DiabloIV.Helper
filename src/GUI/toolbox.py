@@ -366,8 +366,7 @@ class Toolbox(QDialog):
 
         set_btn = QPushButton("SET")
         set_btn.setFixedSize(45, 24)
-        set_btn.key = key
-        set_btn.clicked.connect(self.select_skill_pos)
+        set_btn.clicked.connect(lambda checked, k=key: self.select_skill_pos(k))
         row.addWidget(set_btn)
 
         row.addStretch()
@@ -656,9 +655,7 @@ class Toolbox(QDialog):
         }
         return labels.get(key, key)
 
-    def select_skill_pos(self):
-        sender = self.sender()
-        key = sender.key
+    def select_skill_pos(self, key):
         selector = RectDragSelector()
         result = selector.run()
         if result:
@@ -959,11 +956,15 @@ class Toolbox(QDialog):
         sp = self.findChild(QSpinBox, object_name)
         if sp:
             sp.setValue(int(value))
+        else:
+            logging_helper.log_debug(f"SpinBox not found: {object_name}")
 
     def _find_spin_set_d(self, object_name, value):
         sp = self.findChild(QDoubleSpinBox, object_name)
         if sp:
             sp.setValue(float(value))
+        else:
+            logging_helper.log_debug(f"DoubleSpinBox not found: {object_name}")
 
     def _find_child(self, widget_type, object_name):
         return self.findChild(widget_type, object_name)

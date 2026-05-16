@@ -1,11 +1,28 @@
-import sys
-from typing import Optional, Tuple
+import math
+from enum import Enum, auto
+from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import Qt, QPoint, QRect
-from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont, QCursor
+from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont
 from PyQt5.QtWidgets import QApplication, QWidget
 
 from helper import logging_helper
+
+_HANDLE_SIZE = 10
+_HANDLE_HIT = 14
+_BTN_H = 36
+_BTN_W_ACCEPT = 140
+_BTN_W_CANCEL = 120
+_BTN_MARGIN = 16
+_BTN_GAP = 8
+
+
+class _State(Enum):
+    IDLE = auto()
+    DRAWING = auto()
+    ADJUSTING = auto()
+    ACCEPTED = auto()
+    CANCELLED = auto()
 
 
 class BaseDragSelector(QWidget):
@@ -19,78 +36,312 @@ class BaseDragSelector(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CrossCursor)
 
+        self._state = _State.IDLE
         self._anchor: Optional[QPoint] = None
-        self._confirmed = False
         self._mouse_pos: Optional[QPoint] = None
+        self._drag_mode: Optional[str] = None
+        self._drag_start: Optional[QPoint] = None
+        self._hovered_handle: int = -1
 
     def paintEvent(self, event):
-        if self._anchor is None or self._mouse_pos is None:
-            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        shape = self._compute_shape(self._mouse_pos)
-        if shape is not None:
-            self._paint_shape(painter, shape)
+
+        if self._state == _State.DRAWING and self._anchor and self._mouse_pos:
+            shape = self._compute_shape(self._mouse_pos)
+            if shape is not None:
+                self._paint_shape_drawing(painter, shape)
+
+        elif self._state == _State.ADJUSTING:
+            shape = self._get_current_shape()
+            if shape is not None:
+                self._paint_shape_adjusting(painter, shape)
+                handles = self._get_handles(shape)
+                self._paint_handles(painter, handles)
+                self._paint_buttons(painter)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            if self._anchor is None:
-                self._anchor = event.pos()
-            else:
-                self._confirmed = True
-                shape = self._compute_shape(event.pos())
-                self._on_confirmed(shape)
-                self.close()
+        if event.button() != Qt.LeftButton:
+            return
+
+        pos = event.pos()
+
+        if self._state == _State.ADJUSTING:
+            if self._hit_accept_btn(pos):
+                self._accept()
+                return
+            if self._hit_cancel_btn(pos):
+                self._cancel()
+                return
+
+            handle_idx = self._hit_handle(pos)
+            if handle_idx >= 0:
+                self._drag_mode = 'resize'
+                self._active_handle = handle_idx
+                self._drag_start = pos
+                return
+
+            if self._hit_shape(pos):
+                self._drag_mode = 'move'
+                self._drag_start = pos
+                return
+
+            self._cancel()
+            return
+
+        if self._state == _State.IDLE:
+            self._anchor = pos
+            self._mouse_pos = pos
+            self._state = _State.DRAWING
 
     def mouseMoveEvent(self, event):
-        self._mouse_pos = event.pos()
-        self.update()
+        pos = event.pos()
+        self._mouse_pos = pos
+
+        if self._state == _State.DRAWING:
+            self.update()
+            return
+
+        if self._state == _State.ADJUSTING:
+            if self._drag_mode == 'move' and self._drag_start:
+                delta = pos - self._drag_start
+                self._apply_move(delta)
+                self._drag_start = pos
+            elif self._drag_mode == 'resize' and self._drag_start:
+                self._apply_resize(self._active_handle, pos)
+                self._drag_start = pos
+            else:
+                self._hovered_handle = self._hit_handle(pos)
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return
+
+        if self._state == _State.DRAWING:
+            self._state = _State.ADJUSTING
+            self._finalize_shape(self._mouse_pos)
+            self.setCursor(Qt.ArrowCursor)
+            self.update()
+            return
+
+        if self._state == _State.ADJUSTING:
+            self._drag_mode = None
+            self._drag_start = None
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
-            self.close()
+            self._cancel()
+        elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if self._state == _State.ADJUSTING:
+                self._accept()
 
-    def _compute_shape(self, mouse_pos: QPoint):
-        raise NotImplementedError
+    def _accept(self):
+        self._state = _State.ACCEPTED
+        self._on_confirmed()
+        self.close()
 
-    def _paint_shape(self, painter: QPainter, shape):
-        raise NotImplementedError
+    def _cancel(self):
+        self._state = _State.CANCELLED
+        self.close()
 
-    def _on_confirmed(self, shape):
-        raise NotImplementedError
+    def closeEvent(self, event):
+        if self._state not in (_State.ACCEPTED, _State.CANCELLED):
+            self._state = _State.CANCELLED
+        super().closeEvent(event)
 
     def run(self):
         self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
         loop = QApplication.instance()
         if loop:
             while self.isVisible():
                 loop.processEvents()
+        if self._state == _State.ACCEPTED:
+            return self._get_result()
+        return None
+
+    def _compute_shape(self, mouse_pos: QPoint):
+        raise NotImplementedError
+
+    def _get_current_shape(self):
+        raise NotImplementedError
+
+    def _finalize_shape(self, mouse_pos: QPoint):
+        raise NotImplementedError
+
+    def _paint_shape_drawing(self, painter, shape):
+        raise NotImplementedError
+
+    def _paint_shape_adjusting(self, painter, shape):
+        raise NotImplementedError
+
+    def _get_handles(self, shape) -> List[QRect]:
+        raise NotImplementedError
+
+    def _hit_shape(self, pos: QPoint) -> bool:
+        raise NotImplementedError
+
+    def _apply_move(self, delta: QPoint):
+        raise NotImplementedError
+
+    def _apply_resize(self, handle_idx: int, pos: QPoint):
+        raise NotImplementedError
+
+    def _on_confirmed(self):
+        raise NotImplementedError
+
+    def _get_result(self):
+        raise NotImplementedError
+
+    def _paint_handles(self, painter, handles):
+        for i, h in enumerate(handles):
+            if i == self._hovered_handle:
+                color = QColor(255, 220, 50, 220)
+                border = QColor(255, 220, 50)
+            else:
+                color = QColor(255, 255, 255, 200)
+                border = QColor(200, 200, 200)
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(border, 1))
+            painter.drawRect(h)
+
+    def _paint_buttons(self, painter):
+        screen = self.geometry()
+        accept_x = screen.right() - _BTN_MARGIN - _BTN_W_ACCEPT - _BTN_GAP - _BTN_W_CANCEL
+        accept_y = screen.bottom() - _BTN_MARGIN - _BTN_H
+        self._accept_btn_rect = QRect(accept_x, accept_y, _BTN_W_ACCEPT, _BTN_H)
+
+        cancel_x = accept_x + _BTN_W_ACCEPT + _BTN_GAP
+        self._cancel_btn_rect = QRect(cancel_x, accept_y, _BTN_W_CANCEL, _BTN_H)
+
+        painter.setBrush(QBrush(QColor(0, 160, 80, 220)))
+        painter.setPen(QPen(QColor(0, 200, 100), 2))
+        painter.drawRoundedRect(self._accept_btn_rect, 6, 6)
+        painter.setPen(QPen(Qt.white))
+        painter.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        painter.drawText(self._accept_btn_rect, Qt.AlignCenter, "ACCEPT (Enter)")
+
+        painter.setBrush(QBrush(QColor(180, 40, 40, 220)))
+        painter.setPen(QPen(QColor(220, 60, 60), 2))
+        painter.drawRoundedRect(self._cancel_btn_rect, 6, 6)
+        painter.setPen(QPen(Qt.white))
+        painter.drawText(self._cancel_btn_rect, Qt.AlignCenter, "CANCEL (Esc)")
+
+    def _hit_accept_btn(self, pos: QPoint) -> bool:
+        return hasattr(self, '_accept_btn_rect') and self._accept_btn_rect.contains(pos)
+
+    def _hit_cancel_btn(self, pos: QPoint) -> bool:
+        return hasattr(self, '_cancel_btn_rect') and self._cancel_btn_rect.contains(pos)
+
+    def _hit_handle(self, pos: QPoint) -> int:
+        shape = self._get_current_shape()
+        if shape is None:
+            return -1
+        handles = self._get_handles(shape)
+        expanded = [h.adjusted(-_HANDLE_HIT // 2, -_HANDLE_HIT // 2,
+                               _HANDLE_HIT // 2, _HANDLE_HIT // 2) for h in handles]
+        for i, h in enumerate(expanded):
+            if h.contains(pos):
+                return i
+        return -1
+
+    def _paint_dim_label(self, painter, text, x, y):
+        painter.setPen(QPen(QColor(255, 255, 255, 220)))
+        painter.setFont(QFont("Segoe UI", 10))
+        painter.drawText(QPoint(x, y), text)
 
 
 class RectDragSelector(BaseDragSelector):
     def __init__(self):
         super().__init__()
         self.result_rect: Optional[QRect] = None
+        self._rect: Optional[QRect] = None
 
     def _compute_shape(self, mouse_pos: QPoint) -> QRect:
         return QRect(self._anchor, mouse_pos).normalized()
 
-    def _paint_shape(self, painter: QPainter, rect: QRect):
-        fill = QColor(0, 200, 100, 40)
-        border = QColor(255, 255, 255, 200)
-        painter.setBrush(QBrush(fill))
-        painter.setPen(QPen(border, 2))
+    def _get_current_shape(self):
+        return self._rect
+
+    def _finalize_shape(self, mouse_pos: QPoint):
+        self._rect = QRect(self._anchor, mouse_pos).normalized()
+
+    def _paint_shape_drawing(self, painter, rect: QRect):
+        painter.setBrush(QBrush(QColor(0, 200, 100, 35)))
+        painter.setPen(QPen(QColor(255, 255, 255, 180), 2, Qt.DashLine))
         painter.drawRect(rect)
-        painter.setPen(QPen(QColor(255, 255, 255, 220)))
-        painter.setFont(QFont("Segoe UI", 10))
-        label = f"{rect.width()} x {rect.height()}"
-        painter.drawText(rect.topRight() + QPoint(8, 12), label)
+        self._paint_dim_label(painter, f"{rect.width()} x {rect.height()}",
+                              rect.right() + 8, rect.top() + 14)
 
-    def _on_confirmed(self, shape):
-        self.result_rect = shape
+    def _paint_shape_adjusting(self, painter, rect: QRect):
+        painter.setBrush(QBrush(QColor(0, 200, 100, 50)))
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 2))
+        painter.drawRect(rect)
+        self._paint_dim_label(painter, f"{rect.width()} x {rect.height()}",
+                              rect.right() + 8, rect.top() + 14)
+        painter.setPen(QPen(QColor(255, 255, 255, 120), 1, Qt.DotLine))
+        cx = rect.x() + rect.width() // 2
+        cy = rect.y() + rect.height() // 2
+        painter.drawLine(cx, rect.top(), cx, rect.bottom())
+        painter.drawLine(rect.left(), cy, rect.right(), cy)
 
-    def run(self) -> Optional[QRect]:
-        super().run()
+    def _get_handles(self, rect: QRect) -> List[QRect]:
+        hs = _HANDLE_SIZE
+        hx = rect.x() - hs // 2
+        hy = rect.y() - hs // 2
+        mx = rect.x() + rect.width() // 2 - hs // 2
+        my = rect.y() + rect.height() // 2 - hs // 2
+        ex = rect.x() + rect.width() - hs // 2
+        ey = rect.y() + rect.height() - hs // 2
+        return [
+            QRect(hx, hy, hs, hs),
+            QRect(mx, hy, hs, hs),
+            QRect(ex, hy, hs, hs),
+            QRect(ex, my, hs, hs),
+            QRect(ex, ey, hs, hs),
+            QRect(mx, ey, hs, hs),
+            QRect(hx, ey, hs, hs),
+            QRect(hx, my, hs, hs),
+        ]
+
+    def _hit_shape(self, pos: QPoint) -> bool:
+        if self._rect is None:
+            return False
+        return self._rect.contains(pos)
+
+    def _apply_move(self, delta: QPoint):
+        if self._rect:
+            self._rect = self._rect.translated(delta)
+
+    def _apply_resize(self, handle_idx: int, pos: QPoint):
+        if self._rect is None:
+            return
+        r = QRect(self._rect)
+        if handle_idx == 0:
+            r.setTopLeft(pos)
+        elif handle_idx == 1:
+            r.setTop(pos.y())
+        elif handle_idx == 2:
+            r.setTopRight(pos)
+        elif handle_idx == 3:
+            r.setRight(pos.x())
+        elif handle_idx == 4:
+            r.setBottomRight(pos)
+        elif handle_idx == 5:
+            r.setBottom(pos.y())
+        elif handle_idx == 6:
+            r.setBottomLeft(pos)
+        elif handle_idx == 7:
+            r.setLeft(pos.x())
+        self._rect = r.normalized()
+
+    def _on_confirmed(self):
+        self.result_rect = self._rect
+
+    def _get_result(self):
         return self.result_rect
 
 
@@ -99,37 +350,85 @@ class CircleDragSelector(BaseDragSelector):
         super().__init__()
         self.result_center: Optional[QPoint] = None
         self.result_radius: int = 0
+        self._center: Optional[QPoint] = None
+        self._radius: int = 0
 
     def _compute_shape(self, mouse_pos: QPoint) -> Tuple[QPoint, int]:
         center = self._anchor
         dx = mouse_pos.x() - center.x()
         dy = mouse_pos.y() - center.y()
-        radius = int((dx * dx + dy * dy) ** 0.5)
+        radius = int(math.sqrt(dx * dx + dy * dy))
         return center, radius
 
-    def _paint_shape(self, painter: QPainter, shape: Tuple[QPoint, int]):
+    def _get_current_shape(self):
+        if self._center is not None:
+            return self._center, self._radius
+        return None
+
+    def _finalize_shape(self, mouse_pos: QPoint):
+        self._center = QPoint(self._anchor)
+        dx = mouse_pos.x() - self._center.x()
+        dy = mouse_pos.y() - self._center.y()
+        self._radius = int(math.sqrt(dx * dx + dy * dy))
+
+    def _paint_shape_drawing(self, painter, shape: Tuple[QPoint, int]):
         center, radius = shape
-        fill = QColor(0, 200, 100, 40)
-        border = QColor(255, 255, 255, 200)
-        painter.setBrush(QBrush(fill))
-        painter.setPen(QPen(border, 2))
+        painter.setBrush(QBrush(QColor(0, 200, 100, 35)))
+        painter.setPen(QPen(QColor(255, 255, 255, 180), 2, Qt.DashLine))
         painter.drawEllipse(center, radius, radius)
         painter.setPen(QPen(QColor(255, 255, 255, 150), 1, Qt.DashLine))
         painter.drawLine(center + QPoint(-radius, 0), center + QPoint(radius, 0))
         painter.drawLine(center + QPoint(0, -radius), center + QPoint(0, radius))
-        painter.setPen(QPen(QColor(0, 200, 100, 200), 3))
+        painter.setPen(QPen(QColor(0, 200, 100, 200), 4))
         painter.drawPoint(center)
-        painter.setPen(QPen(QColor(255, 255, 255, 220)))
-        painter.setFont(QFont("Segoe UI", 10))
-        painter.drawText(center + QPoint(radius + 8, 6), f"r={radius}")
+        self._paint_dim_label(painter, f"r={radius}", center.x() + radius + 10, center.y() + 6)
 
-    def _on_confirmed(self, shape):
+    def _paint_shape_adjusting(self, painter, shape: Tuple[QPoint, int]):
         center, radius = shape
-        self.result_center = center
-        self.result_radius = radius
+        painter.setBrush(QBrush(QColor(0, 200, 100, 50)))
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 2))
+        painter.drawEllipse(center, radius, radius)
+        painter.setPen(QPen(QColor(255, 255, 255, 120), 1, Qt.DotLine))
+        painter.drawLine(center + QPoint(-radius, 0), center + QPoint(radius, 0))
+        painter.drawLine(center + QPoint(0, -radius), center + QPoint(0, radius))
+        painter.setPen(QPen(QColor(0, 200, 100, 220), 4))
+        painter.drawPoint(center)
+        self._paint_dim_label(painter, f"r={radius}", center.x() + radius + 10, center.y() + 6)
 
-    def run(self) -> Optional[Tuple[QPoint, int]]:
-        super().run()
+    def _get_handles(self, shape) -> List[QRect]:
+        center, radius = shape
+        hs = _HANDLE_SIZE
+        positions = [
+            QPoint(center.x() + radius, center.y()),
+            QPoint(center.x(), center.y() - radius),
+            QPoint(center.x() - radius, center.y()),
+            QPoint(center.x(), center.y() + radius),
+        ]
+        return [QRect(p.x() - hs // 2, p.y() - hs // 2, hs, hs) for p in positions]
+
+    def _hit_shape(self, pos: QPoint) -> bool:
+        if self._center is None:
+            return False
+        dx = pos.x() - self._center.x()
+        dy = pos.y() - self._center.y()
+        return math.sqrt(dx * dx + dy * dy) <= self._radius
+
+    def _apply_move(self, delta: QPoint):
+        if self._center:
+            self._center = self._center + delta
+
+    def _apply_resize(self, handle_idx: int, pos: QPoint):
+        if self._center is None:
+            return
+        dx = pos.x() - self._center.x()
+        dy = pos.y() - self._center.y()
+        self._radius = max(5, int(math.sqrt(dx * dx + dy * dy)))
+
+    def _on_confirmed(self):
+        self.result_center = self._center
+        self.result_radius = self._radius
+
+    def _get_result(self):
         if self.result_center is not None:
             return self.result_center, self.result_radius
         return None
