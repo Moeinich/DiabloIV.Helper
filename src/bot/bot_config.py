@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from helper import config_helper, logging_helper
 
-SKILLPATH = Path(__file__).resolve().parents[2] / "assets" / "skills"
+SKILLPATH = Path(__file__).resolve().parents[1] / "assets" / "skills"
 
 _cache_lock = Lock()
 _cache = None
@@ -12,20 +12,26 @@ _cache = None
 VALID_CLASSES = {'Druid', 'Spiritborn', 'Barbarian', 'Necromancer', 'Sorceress', 'Rogue', 'Warlock', 'Paladin'}
 
 
+_PER_SLOT_ATTRS = ['key', 'enabled', 'pos', 'mode', 'priority',
+                   'delay_min', 'delay_max', 'hp_min', 'hp_max',
+                   'resource_min', 'resource_max', 'chain_next', 'chain_delay']
+
+_ORB_ATTRS = ['hp_orb_center', 'hp_orb_radius', 'hp_orb_empty_color', 'hp_orb_tolerance',
+              'resource_orb_center', 'resource_orb_radius', 'resource_orb_empty_color', 'resource_orb_tolerance']
+
+
+def _build_slots():
+    slots = ['class_name', 'class_lower']
+    for slot in config_helper.SKILL_SLOTS:
+        for attr in _PER_SLOT_ATTRS:
+            slots.append(f'{slot}_{attr}')
+    slots.extend(_ORB_ATTRS)
+    slots.append('rotation_hotkey')
+    return tuple(slots)
+
+
 class BotConfig:
-    __slots__ = (
-        'class_name', 'class_lower',
-        'skill1_key', 'skill2_key', 'skill3_key', 'skill4_key', 'skill5_key', 'skill6_key',
-        'pot_key', 'evade_key',
-        'skill1_enabled', 'skill2_enabled', 'skill3_enabled', 'skill4_enabled',
-        'skill5_enabled', 'skill6_enabled',
-        'pot_enabled', 'evade_enabled',
-        'skill1_pos', 'skill2_pos', 'skill3_pos', 'skill4_pos',
-        'skill5_pos', 'skill6_pos',
-        'pot_pos', 'evade_pos',
-        'hp_pixel',
-        'rotation_hotkey',
-    )
+    __slots__ = _build_slots()
 
     def __init__(self):
         self.class_name = 'Paladin'
@@ -33,14 +39,8 @@ class BotConfig:
         for attr in self.__slots__:
             if not hasattr(self, attr):
                 setattr(self, attr, None)
-        self.skill1_enabled = True
-        self.skill2_enabled = True
-        self.skill3_enabled = True
-        self.skill4_enabled = True
-        self.skill5_enabled = True
-        self.skill6_enabled = True
-        self.pot_enabled = True
-        self.evade_enabled = True
+        for slot in config_helper.SKILL_SLOTS:
+            setattr(self, f'{slot}_enabled', True)
 
     def skill_region(self, key: str) -> Optional[Tuple[int, int, int, int]]:
         pos = getattr(self, f'{key}_pos', None)
@@ -56,6 +56,36 @@ class BotConfig:
 
     def skill_key(self, key: str) -> str:
         return getattr(self, f'{key}_key', '') or ''
+
+    def skill_mode(self, key: str) -> str:
+        return getattr(self, f'{key}_mode', 'ready') or 'ready'
+
+    def skill_priority(self, key: str) -> int:
+        return getattr(self, f'{key}_priority', 5) or 5
+
+    def skill_delay_min(self, key: str) -> float:
+        return getattr(self, f'{key}_delay_min', 0.0) or 0.0
+
+    def skill_delay_max(self, key: str) -> float:
+        return getattr(self, f'{key}_delay_max', 0.0) or 0.0
+
+    def skill_hp_min(self, key: str) -> int:
+        return getattr(self, f'{key}_hp_min', 0) or 0
+
+    def skill_hp_max(self, key: str) -> int:
+        return getattr(self, f'{key}_hp_max', 100) or 100
+
+    def skill_resource_min(self, key: str) -> int:
+        return getattr(self, f'{key}_resource_min', 0) or 0
+
+    def skill_resource_max(self, key: str) -> int:
+        return getattr(self, f'{key}_resource_max', 100) or 100
+
+    def skill_chain_next(self, key: str) -> str:
+        return getattr(self, f'{key}_chain_next', '') or ''
+
+    def skill_chain_delay(self, key: str) -> float:
+        return getattr(self, f'{key}_chain_delay', 0.1) or 0.1
 
 
 def init():
@@ -78,15 +108,27 @@ def init():
     cls_cfg = config_helper.get_class_config(class_name)
 
     all_positions = []
-    for key in ('skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade'):
+    macro_attrs = [a for a in _PER_SLOT_ATTRS if a not in ('key', 'enabled', 'pos')]
+    for key in config_helper.SKILL_SLOTS:
         setattr(c, f'{key}_key', cls_cfg.get(key, ''))
         setattr(c, f'{key}_enabled', cls_cfg.get(f'{key}_enabled', True))
         pos = cls_cfg.get(f'{key}_pos')
         setattr(c, f'{key}_pos', pos)
         if pos and isinstance(pos, (list, tuple)) and len(pos) >= 4:
             all_positions.append(pos)
+        for attr in macro_attrs:
+            val = cls_cfg.get(f'{key}_{attr}')
+            if val is not None:
+                setattr(c, f'{key}_{attr}', val)
 
-    c.hp_pixel = cfg.get('hp_pixel', (608, 980, [[95, 10, 15], [148, 14, 24], [97, 29, 82]]))
+    c.hp_orb_center = cfg.get('hp_orb_center')
+    c.hp_orb_radius = cfg.get('hp_orb_radius')
+    c.hp_orb_empty_color = cfg.get('hp_orb_empty_color')
+    c.hp_orb_tolerance = cfg.get('hp_orb_tolerance', 45)
+    c.resource_orb_center = cfg.get('resource_orb_center')
+    c.resource_orb_radius = cfg.get('resource_orb_radius')
+    c.resource_orb_empty_color = cfg.get('resource_orb_empty_color')
+    c.resource_orb_tolerance = cfg.get('resource_orb_tolerance', 45)
     c.rotation_hotkey = cfg.get('rotation_hotkey', 'f6')
 
     if all_positions:

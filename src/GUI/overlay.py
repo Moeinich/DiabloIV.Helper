@@ -7,65 +7,19 @@ from PyQt5.QtGui import QIcon, QStandardItemModel, QStandardItem, QPainter, QPen
 from PyQt5.QtWidgets import (QApplication, QComboBox, QMainWindow,
                              QGroupBox, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QStyleFactory, QWidget)
 
+from pathlib import Path
+
 from helper import config_helper, logging_helper, process_helper
 from bot import rotation, bot_config
 from GUI import toolbox
+from GUI.styles import OVERLAY_STYLESHEET
 from pynput import mouse as pynput_mouse
 
 WINDOW_X = 660
 WINDOW_Y = 0
 WINDOW_WIDTH = 600
 WINDOW_HEIGHT = 40
-ICON_PATH = './assets/layout/mmorpg_helper.ico'
-
-DARK_STYLE = """
-    QWidget {
-        background-color: rgba(15, 15, 20, 220);
-        color: #e0e0e0;
-        font-family: Segoe UI, Arial;
-    }
-    QPushButton {
-        background-color: rgba(50, 50, 60, 230);
-        color: #e0e0e0;
-        border: 1px solid rgba(80, 80, 100, 150);
-        border-radius: 4px;
-        padding: 3px 12px;
-        font-weight: bold;
-    }
-    QPushButton:hover {
-        background-color: rgba(70, 70, 85, 240);
-    }
-    QPushButton:pressed {
-        background-color: rgba(40, 40, 50, 230);
-    }
-    QComboBox {
-        background-color: rgba(40, 40, 50, 230);
-        color: #e0e0e0;
-        border: 1px solid rgba(80, 80, 100, 150);
-        border-radius: 4px;
-        padding: 2px 8px;
-    }
-    QComboBox::drop-down {
-        border: none;
-        width: 20px;
-    }
-    QComboBox::down-arrow {
-        image: none;
-        border-left: 4px solid transparent;
-        border-right: 4px solid transparent;
-        border-top: 5px solid #808080;
-        margin-right: 5px;
-    }
-    QComboBox QAbstractItemView {
-        background-color: rgba(30, 30, 40, 250);
-        color: #e0e0e0;
-        selection-background-color: rgba(0, 180, 100, 200);
-    }
-    QLabel {
-        background-color: transparent;
-        color: #e0e0e0;
-    }
-"""
+ICON_PATH = str(Path(__file__).resolve().parents[1] / "assets" / "layout" / "mmorpg_helper.ico")
 
 class Overlay(QMainWindow):
     def __init__(self, parent=None):
@@ -87,11 +41,11 @@ class Overlay(QMainWindow):
         self.setWindowTitle(self.name)
         self.setGeometry(WINDOW_X, WINDOW_Y, WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.setStyleSheet(DARK_STYLE)
+        self.setStyleSheet(OVERLAY_STYLESHEET)
 
         visible_window = QWidget(self)
         visible_window.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        visible_window.setStyleSheet(DARK_STYLE)
+        visible_window.setStyleSheet(OVERLAY_STYLESHEET)
 
         self.createDropdownBox()
         self.createStartBox()

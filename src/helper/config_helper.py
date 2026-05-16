@@ -12,20 +12,28 @@ _config_cache_time = 0.0
 _config_cache_lock = threading.Lock()
 _CACHE_TTL = 2.0
 
-CLASS_KEYS = [
-    'skill1', 'skill1_pos', 'skill1_enabled',
-    'skill2', 'skill2_pos', 'skill2_enabled',
-    'skill3', 'skill3_pos', 'skill3_enabled',
-    'skill4', 'skill4_pos', 'skill4_enabled',
-    'skill5', 'skill5_pos', 'skill5_enabled',
-    'skill6', 'skill6_pos', 'skill6_enabled',
-    'pot', 'pot_pos', 'pot_enabled',
-    'evade', 'evade_pos', 'evade_enabled',
+SKILL_SLOTS = ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']
+
+MACRO_KEYS_PER_SKILL = [
+    '{key}_mode', '{key}_priority',
+    '{key}_delay_min', '{key}_delay_max',
+    '{key}_hp_min', '{key}_hp_max',
+    '{key}_resource_min', '{key}_resource_max',
+    '{key}_chain_next', '{key}_chain_delay',
 ]
+
+CLASS_KEYS = []
+for _slot in SKILL_SLOTS:
+    CLASS_KEYS.append(_slot)
+    CLASS_KEYS.append(f'{_slot}_pos')
+    CLASS_KEYS.append(f'{_slot}_enabled')
+    for _mk in MACRO_KEYS_PER_SKILL:
+        CLASS_KEYS.append(_mk.format(key=_slot))
 
 SHARED_KEYS = [
     'apptitle', 'class', 'rotation_hotkey',
-    'hp_pixel', 'hp_r', 'hp_g', 'hp_b',
+    'hp_orb_center', 'hp_orb_radius', 'hp_orb_empty_color', 'hp_orb_tolerance',
+    'resource_orb_center', 'resource_orb_radius', 'resource_orb_empty_color', 'resource_orb_tolerance',
     'region_detect',
 ]
 
@@ -82,6 +90,15 @@ def read_config() -> Dict[str, Any]:
                         data = _migrate_to_nested(data)
                     finally:
                         _config_cache_lock.acquire()
+                else:
+                    data = _ensure_macro_defaults(data)
+                    if data.get('_needs_write'):
+                        del data['_needs_write']
+                        _config_cache_lock.release()
+                        try:
+                            write_config(data)
+                        finally:
+                            _config_cache_lock.acquire()
                 _config_cache = data
                 _config_cache_time = time.time()
                 return data
@@ -130,6 +147,23 @@ def _migrate_to_nested(data: Dict[str, Any]) -> Dict[str, Any]:
         if cls_name not in class_data:
             class_data[cls_name] = {}
 
+    _MACRO_DEFAULTS = {
+        'skill1': {'mode': 'ready', 'priority': 3},
+        'skill2': {'mode': 'ready', 'priority': 4},
+        'skill3': {'mode': 'ready', 'priority': 2},
+        'skill4': {'mode': 'ready', 'priority': 1},
+        'skill5': {'mode': 'ready', 'priority': 5},
+        'skill6': {'mode': 'ready', 'priority': 6},
+        'pot':    {'mode': 'hp_guard', 'priority': 7, 'hp_min': 0, 'hp_max': 80},
+        'evade':  {'mode': 'hp_guard', 'priority': 8, 'hp_min': 0, 'hp_max': 60},
+    }
+    _SHARED_MACRO_DEFAULTS = {
+        'delay_min': 0.0, 'delay_max': 0.0,
+        'hp_min': 0, 'hp_max': 100,
+        'resource_min': 0, 'resource_max': 100,
+        'chain_next': '', 'chain_delay': 0.1,
+    }
+
     result = {
         'classes': class_data,
         **shared
@@ -145,9 +179,58 @@ def _migrate_to_nested(data: Dict[str, Any]) -> Dict[str, Any]:
             if k not in result['classes'][cls_name]:
                 result['classes'][cls_name][k] = v
 
+        for slot, slot_defaults in _MACRO_DEFAULTS.items():
+            for mk, mv in slot_defaults.items():
+                key = f'{slot}_{mk}'
+                if key not in result['classes'][cls_name]:
+                    result['classes'][cls_name][key] = mv
+            for mk, mv in _SHARED_MACRO_DEFAULTS.items():
+                key = f'{slot}_{mk}'
+                if key not in result['classes'][cls_name]:
+                    result['classes'][cls_name][key] = mv
+
     write_config(result)
     logging_helper.log_info("Migrated config from flat to nested per-class structure")
     return result
+
+_MACRO_DEFAULTS = {
+    'skill1': {'mode': 'ready', 'priority': 3},
+    'skill2': {'mode': 'ready', 'priority': 4},
+    'skill3': {'mode': 'ready', 'priority': 2},
+    'skill4': {'mode': 'ready', 'priority': 1},
+    'skill5': {'mode': 'ready', 'priority': 5},
+    'skill6': {'mode': 'ready', 'priority': 6},
+    'pot':    {'mode': 'hp_guard', 'priority': 7, 'hp_min': 0, 'hp_max': 80},
+    'evade':  {'mode': 'hp_guard', 'priority': 8, 'hp_min': 0, 'hp_max': 60},
+}
+_SHARED_MACRO_DEFAULTS = {
+    'delay_min': 0.0, 'delay_max': 0.0,
+    'hp_min': 0, 'hp_max': 100,
+    'resource_min': 0, 'resource_max': 100,
+    'chain_next': '', 'chain_delay': 0.1,
+}
+
+def _ensure_macro_defaults(data: Dict[str, Any]) -> Dict[str, Any]:
+    if 'classes' not in data:
+        return data
+    needs_write = False
+    for cls_name, cls_cfg in data['classes'].items():
+        if not isinstance(cls_cfg, dict):
+            continue
+        for slot, slot_defaults in _MACRO_DEFAULTS.items():
+            for mk, mv in slot_defaults.items():
+                key = f'{slot}_{mk}'
+                if key not in cls_cfg:
+                    cls_cfg[key] = mv
+                    needs_write = True
+            for mk, mv in _SHARED_MACRO_DEFAULTS.items():
+                key = f'{slot}_{mk}'
+                if key not in cls_cfg:
+                    cls_cfg[key] = mv
+                    needs_write = True
+    if needs_write:
+        data['_needs_write'] = True
+    return data
 
 def get_current_class() -> str:
     """Returns the currently selected class name."""

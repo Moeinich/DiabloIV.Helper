@@ -1,17 +1,15 @@
-from random import uniform, random
+from random import uniform, random, shuffle
 from time import sleep
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from pydirectinput import keyDown, keyUp, leftClick, rightClick
 
 from helper import image_helper, timer_helper, logging_helper
 from helper.timer_helper import TIMER_STOPPED
+from helper.config_helper import SKILL_SLOTS
 from bot import bot_config
 
-SKILLPATH = Path(__file__).resolve().parents[2] / "assets" / "skills"
-
-timer1 = timer_helper.TimerHelper('timer1')
-timer2 = timer_helper.TimerHelper('timer2')
+SKILLPATH = Path(__file__).resolve().parents[1] / "assets" / "skills"
 
 POTION_TIMER_SEC = 3
 EVADE_TIMER_SEC = 3
@@ -67,20 +65,25 @@ class SkillCastTracker:
 
 _cast_tracker = SkillCastTracker()
 
-_skill_states = {}
+_skill_states: Dict[str, dict] = {}
+_skill_timers: Dict[str, timer_helper.TimerHelper] = {}
+for _s in SKILL_SLOTS:
+    _skill_timers[_s] = timer_helper.TimerHelper(_s)
+
+_chain_pending: Optional[str] = None
 
 
 def get_skill_states():
     return _skill_states.copy()
 
 
-def _record_skill_state(key: str, found: bool, enabled: bool):
+def _record_skill_state(key: str, found: bool, enabled: bool, mode: str = ''):
     if not enabled:
-        _skill_states[key] = 'disabled'
+        _skill_states[key] = {'state': 'disabled', 'mode': mode}
     elif found:
-        _skill_states[key] = 'ready'
+        _skill_states[key] = {'state': 'ready', 'mode': mode}
     else:
-        _skill_states[key] = 'cd'
+        _skill_states[key] = {'state': 'cd', 'mode': mode}
 
 
 def _reaction_delay() -> float:
@@ -109,25 +112,131 @@ def human_press(key: str) -> None:
     keyUp(key)
 
 
-def _compute_hp_ratio(c: bot_config.BotConfig) -> float:
+def _read_bars(c: bot_config.BotConfig) -> Tuple[float, float]:
+    hp = 0.5
     try:
-        raw = c.hp_pixel
-        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
-            raw = [608, 980, [[95, 10, 15], [148, 14, 24], [97, 29, 82]]]
-        hp_x, hp_y = raw[0], raw[1]
-        hp_colors = raw[2] if len(raw) > 2 and isinstance(raw[2], list) else [[95, 10, 15], [148, 14, 24], [97, 29, 82]]
-        if hp_colors and isinstance(hp_colors[0], (int, float)):
-            hp_colors = [hp_colors]
-        for color in hp_colors:
-            if len(color) >= 3 and image_helper.pixel_matches_color(hp_x, hp_y, color[0], color[1], color[2], 45):
-                return 1.0
-        return 0.0
-    except Exception:
-        return 0.5
+        if c.hp_orb_center and c.hp_orb_radius and c.hp_orb_empty_color:
+            hp = image_helper.read_orb_fill_percentage(
+                c.hp_orb_center[0], c.hp_orb_center[1], c.hp_orb_radius,
+                c.hp_orb_empty_color[0], c.hp_orb_empty_color[1], c.hp_orb_empty_color[2],
+                c.hp_orb_tolerance
+            )
+    except Exception as ex:
+        logging_helper.log_debug(f"_read_bars hp error: {ex}")
+
+    resource = 0.5
+    try:
+        if c.resource_orb_center and c.resource_orb_radius and c.resource_orb_empty_color:
+            resource = image_helper.read_orb_fill_percentage(
+                c.resource_orb_center[0], c.resource_orb_center[1], c.resource_orb_radius,
+                c.resource_orb_empty_color[0], c.resource_orb_empty_color[1], c.resource_orb_empty_color[2],
+                c.resource_orb_tolerance
+            )
+    except Exception as ex:
+        logging_helper.log_debug(f"_read_bars resource error: {ex}")
+
+    return hp, resource
 
 
 def _hp_delay_multiplier(hp_ratio: float) -> float:
     return 0.35 + (hp_ratio * 0.65)
+
+
+def _icon_index(key: str) -> str:
+    mapping = {
+        'skill1': '01', 'skill2': '02', 'skill3': '03',
+        'skill4': '04', 'skill5': '05', 'skill6': '06',
+    }
+    return mapping.get(key, '')
+
+
+def _skill_conf(key: str) -> float:
+    if key in ('skill5', 'skill6'):
+        return 0.9
+    return 0.6
+
+
+def _evaluate_skill(c: bot_config.BotConfig, key: str, hp_pct: float, resource_pct: float) -> bool:
+    mode = c.skill_mode(key)
+    hp_checked = False
+    resource_checked = False
+
+    if mode == 'delay':
+        dmax = c.skill_delay_max(key)
+        if dmax > 0:
+            if _skill_timers[key].get_timer_state() != TIMER_STOPPED:
+                return False
+    elif mode == 'hp_guard':
+        if not (c.skill_hp_min(key) <= hp_pct <= c.skill_hp_max(key)):
+            return False
+        hp_checked = True
+    elif mode == 'resource_guard':
+        if not (c.skill_resource_min(key) <= resource_pct <= c.skill_resource_max(key)):
+            return False
+        resource_checked = True
+
+    if not hp_checked:
+        if not (c.skill_hp_min(key) <= hp_pct <= c.skill_hp_max(key)):
+            return False
+    if not resource_checked:
+        if not (c.skill_resource_min(key) <= resource_pct <= c.skill_resource_max(key)):
+            return False
+
+    icon_idx = _icon_index(key)
+    if icon_idx:
+        found = image_helper.locate_needle(c.skill_icon(icon_idx), conf=_skill_conf(key), region=c.skill_region(key))
+    elif key == 'pot':
+        found = image_helper.locate_needle(str(SKILLPATH / 'pot.png'), conf=0.7, region=c.skill_region('pot'))
+    elif key == 'evade':
+        found = image_helper.locate_needle(str(SKILLPATH / 'evade.png'), conf=0.7, region=c.skill_region('evade'))
+    else:
+        return False
+
+    _record_skill_state(key, bool(found), True, mode)
+    return bool(found)
+
+
+def _cast_skill(c: bot_config.BotConfig, key: str, delay_mult: float) -> bool:
+    hotkey = c.skill_key(key)
+    if not hotkey:
+        return False
+
+    if key == 'skill5':
+        leftClick()
+    elif key == 'skill6':
+        rightClick()
+    else:
+        human_press(hotkey)
+
+    _cast_tracker.record_cast(key)
+    logging_helper.log_info(f'Used {key}')
+
+    dmax = c.skill_delay_max(key)
+    if dmax > 0:
+        dmin = c.skill_delay_min(key)
+        delay = uniform(dmin, dmax)
+        _skill_timers[key].start_timer(delay)
+
+    if key == 'pot':
+        _skill_timers['pot'].start_timer(POTION_TIMER_SEC)
+    elif key == 'evade':
+        _skill_timers['evade'].start_timer(EVADE_TIMER_SEC)
+
+    chain_next = c.skill_chain_next(key)
+    if chain_next:
+        global _chain_pending
+        _chain_pending = chain_next
+
+    sleep(_post_cast_delay() * delay_mult)
+    return True
+
+
+def _apply_priority_noise(candidates: List[str]) -> List[str]:
+    result = list(candidates)
+    for i in range(len(result) - 1):
+        if random() < PRIORITY_NOISE_CHANCE:
+            result[i], result[i + 1] = result[i + 1], result[i]
+    return result
 
 
 def rotation() -> None:
@@ -143,156 +252,77 @@ def rotation() -> None:
 
 
 def combat_rotation(c: bot_config.BotConfig) -> None:
-    hp_ratio = _compute_hp_ratio(c)
-    mult = _hp_delay_multiplier(hp_ratio)
+    global _chain_pending
 
-    if handle_health_and_evade(c, mult):
+    hp_ratio, resource_ratio = _read_bars(c)
+    mult = _hp_delay_multiplier(hp_ratio)
+    hp_pct = hp_ratio * 100
+    resource_pct = resource_ratio * 100
+
+    if hp_ratio < 1.0:
+        _handle_survival(c, hp_pct, resource_pct, mult)
         sleep(_hp_hesitation_delay())
 
-    use_skills(c, mult)
+    if _chain_pending:
+        chain_key = _chain_pending
+        _chain_pending = None
+        if c.is_skill_enabled(chain_key):
+            chain_delay = uniform(0.05, 0.15)
+            sleep(chain_delay * mult)
+            if _evaluate_skill(c, chain_key, hp_pct, resource_pct):
+                _cast_skill(c, chain_key, mult)
+                sleep(uniform(0.04, 0.18) * mult)
+                _distracted_pause()
+                return
 
+    regular = []
+    fillers = []
+    for key in SKILL_SLOTS:
+        if key in ('pot', 'evade'):
+            continue
+        if not c.is_skill_enabled(key):
+            _record_skill_state(key, False, False, c.skill_mode(key))
+            continue
+        mode = c.skill_mode(key)
+        if mode == 'filler':
+            fillers.append(key)
+        else:
+            regular.append((c.skill_priority(key), key))
+
+    regular.sort(key=lambda x: (x[0], random()))
+    ordered = [k for _, k in regular]
+    ordered = _apply_priority_noise(ordered)
+
+    for key in ordered:
+        if _evaluate_skill(c, key, hp_pct, resource_pct):
+            _cast_skill(c, key, mult)
+            sleep(uniform(0.04, 0.18) * mult)
+            _distracted_pause()
+            return
+
+    if fillers:
+        shuffle(fillers)
+        for key in fillers:
+            if _evaluate_skill(c, key, hp_pct, resource_pct):
+                _cast_skill(c, key, mult)
+                sleep(uniform(0.04, 0.18) * mult)
+                _distracted_pause()
+                return
+
+    sleep(uniform(HUMAN_SKILL_LOOP_MIN, HUMAN_SKILL_LOOP_MAX) * mult)
     sleep(uniform(0.04, 0.18) * mult)
     _distracted_pause()
 
 
-def handle_health_and_evade(c: bot_config.BotConfig, delay_mult: float = 1.0) -> bool:
-    try:
-        hp_ratio = _compute_hp_ratio(c)
-        if hp_ratio >= 1.0:
-            return False
-
-        if c.is_skill_enabled('pot'):
-            if locate_and_use_potion(c, delay_mult):
-                logging_helper.log_info('Used potion')
-        else:
-            _record_skill_state('pot', False, False)
-
-        if c.is_skill_enabled('evade'):
-            if locate_and_use_evade(c, delay_mult):
-                logging_helper.log_info('Used evade')
-        else:
-            _record_skill_state('evade', False, False)
-
-        return True
-    except Exception as ex:
-        logging_helper.log_debug("handle_health_and_evade error: %s" % ex)
-
-    return False
-
-
-def locate_and_use_potion(c: bot_config.BotConfig, delay_mult: float = 1.0) -> bool:
-    try:
-        path = str(SKILLPATH / 'pot.png')
-        region = c.skill_region('pot')
-        try:
-            found = image_helper.locate_needle(path, conf=0.7, region=region)
-        except Exception as ex:
-            logging_helper.log_debug("locate_needle error for %s: %s" % (path, ex))
-            found = False
-
-        _record_skill_state('pot', bool(found), True)
-
-        if found and timer1.get_timer_state() == TIMER_STOPPED:
-            timer1.start_timer(POTION_TIMER_SEC)
+def _handle_survival(c: bot_config.BotConfig, hp_pct: float, resource_pct: float, delay_mult: float) -> None:
+    for key in ('pot', 'evade'):
+        if not c.is_skill_enabled(key):
+            _record_skill_state(key, False, False, c.skill_mode(key))
+            continue
+        if _skill_timers[key].get_timer_state() != TIMER_STOPPED:
+            _record_skill_state(key, False, True, c.skill_mode(key))
+            continue
+        if _evaluate_skill(c, key, hp_pct, resource_pct):
             sleep(_hp_hesitation_delay() * delay_mult)
-            try:
-                human_press(c.pot_key)
-                _cast_tracker.record_cast('pot')
-            except Exception as ex:
-                logging_helper.log_debug("human_press(pot) failed: %s" % ex)
+            _cast_skill(c, key, delay_mult)
             sleep(uniform(0.08, 0.20) * delay_mult)
-            return True
-    except Exception as ex:
-        logging_helper.log_debug("locate_and_use_potion error: %s" % ex)
-
-    return False
-
-
-def locate_and_use_evade(c: bot_config.BotConfig, delay_mult: float = 1.0) -> bool:
-    try:
-        path = str(SKILLPATH / 'evade.png')
-        region = c.skill_region('evade')
-        try:
-            found = image_helper.locate_needle(path, conf=0.7, region=region)
-        except Exception as ex:
-            logging_helper.log_debug("locate_needle error for evade: %s" % ex)
-            found = False
-
-        _record_skill_state('evade', bool(found), True)
-
-        if found and timer2.get_timer_state() == TIMER_STOPPED:
-            timer2.start_timer(EVADE_TIMER_SEC)
-            sleep(_hp_hesitation_delay() * delay_mult)
-            try:
-                human_press(c.evade_key)
-                _cast_tracker.record_cast('evade')
-            except Exception as ex:
-                logging_helper.log_debug("human_press(evade) failed: %s" % ex)
-            sleep(uniform(0.08, 0.20) * delay_mult)
-            return True
-    except Exception as ex:
-        logging_helper.log_debug("locate_and_use_evade error: %s" % ex)
-
-    return False
-
-
-def use_skills(c: bot_config.BotConfig, delay_mult: float = 1.0) -> None:
-    try:
-        skill_order = [
-            ('skill4', c.skill_key('skill4'), '04', c.skill_region('skill4')),
-            ('skill3', c.skill_key('skill3'), '03', c.skill_region('skill3')),
-            ('skill1', c.skill_key('skill1'), '01', c.skill_region('skill1')),
-            ('skill2', c.skill_key('skill2'), '02', c.skill_region('skill2')),
-        ]
-
-        if random() < PRIORITY_NOISE_CHANCE:
-            skill_order = skill_order[::-1]
-
-        cast_done = False
-        for skill_key, skill_hotkey, icon_idx, skill_pos in skill_order:
-            if c.is_skill_enabled(skill_key):
-                found = image_helper.locate_needle(c.skill_icon(icon_idx), conf=0.6, region=skill_pos)
-                _record_skill_state(skill_key, bool(found), True)
-                if found:
-                    sleep(_reaction_delay() * delay_mult)
-                    human_press(skill_hotkey)
-                    _cast_tracker.record_cast(skill_key)
-                    logging_helper.log_info(f'Used {skill_key}')
-                    sleep(_post_cast_delay() * delay_mult)
-                    cast_done = True
-                    break
-            else:
-                _record_skill_state(skill_key, False, False)
-
-        if not cast_done:
-            sleep(uniform(HUMAN_SKILL_LOOP_MIN, HUMAN_SKILL_LOOP_MAX) * delay_mult)
-
-        if c.is_skill_enabled('skill5'):
-            found = image_helper.locate_needle(c.skill_icon('05'), conf=0.9, region=c.skill_region('skill5'))
-            _record_skill_state('skill5', bool(found), True)
-            if found:
-                sleep(_reaction_delay() * delay_mult)
-                leftClick()
-                _cast_tracker.record_cast('skill5')
-                logging_helper.log_info('Used skill 5 (LMouse)')
-                sleep(_post_cast_delay() * delay_mult)
-                return
-        else:
-            _record_skill_state('skill5', False, False)
-
-        if c.is_skill_enabled('skill6'):
-            found = image_helper.locate_needle(c.skill_icon('06'), conf=0.9, region=c.skill_region('skill6'))
-            _record_skill_state('skill6', bool(found), True)
-            if found:
-                sleep(_reaction_delay() * delay_mult)
-                rightClick()
-                _cast_tracker.record_cast('skill6')
-                logging_helper.log_info('Used skill 6 (RMouse)')
-                sleep(_post_cast_delay() * delay_mult)
-                return
-        else:
-            _record_skill_state('skill6', False, False)
-
-        sleep(uniform(HUMAN_ULT_LOOP_MIN, HUMAN_ULT_LOOP_MAX) * delay_mult)
-    except Exception as ex:
-        logging_helper.log_debug("use_skills error: %s" % ex)

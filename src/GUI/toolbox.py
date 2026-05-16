@@ -1,114 +1,19 @@
-from os import path
 from pathlib import Path
 from keyboard import add_hotkey
 from PyQt5.QtCore import Qt, QPoint, QRect, QTimer
-from PyQt5.QtGui import QCursor
-from PyQt5.QtGui import QIcon, QPixmap, QIntValidator, QPainter, QPen, QBrush, QColor
-from PyQt5.QtWidgets import (QApplication, QCheckBox, QDialog, QGridLayout, QLineEdit,
-                              QGroupBox, QHBoxLayout, QLabel, QPushButton, QStyleFactory, QWidget)
+from PyQt5.QtGui import QIcon, QPainter, QPen, QBrush, QColor, QFont
+from PyQt5.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QScrollArea, QSpinBox, QStyleFactory, QTabWidget,
+    QVBoxLayout, QWidget,
+)
 
 from helper import image_helper, config_helper, logging_helper
 from bot import bot_config
+from GUI.styles import TOOLBOX_STYLESHEET
+from GUI.selectors import RectDragSelector, CircleDragSelector
 from pynput import mouse as pynput_mouse
-
-
-class RegionSelector(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setGeometry(QApplication.desktop().screenGeometry())
-        self.corner1 = None
-        self.corner2 = None
-        self.is_first_click = True
-        self.mouse_pos = QCursor.pos()
-        self.mouse_tracking_timer = QTimer()
-        self.mouse_tracking_timer.timeout.connect(self._update_mouse_pos)
-        self.mouse_tracking_timer.start(16)
-        self.listener = None
-
-    def _update_mouse_pos(self):
-        self.mouse_pos = QCursor.pos()
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        if self.corner1 and self.corner2:
-            rect = QRect(self.corner1, self.corner2).normalized()
-            painter.setPen(QPen(Qt.white, 2))
-            painter.setBrush(QBrush(QColor(0, 255, 0, 80)))
-            painter.drawRect(rect)
-            label = f"{rect.width()}x{rect.height()}"
-            painter.setPen(QPen(Qt.white, 1))
-            painter.drawText(rect.center(), label)
-        elif self.corner1:
-            painter.setPen(QPen(Qt.yellow, 2))
-            painter.setBrush(QBrush(QColor(255, 255, 0, 150)))
-            painter.drawEllipse(self.corner1, 12, 12)
-            painter.drawText(self.corner1 + QPoint(15, 5), "Click 2nd corner")
-        else:
-            painter.setPen(QPen(Qt.red, 2))
-            painter.drawText(self.mouse_pos + QPoint(15, 5), "Click 1st corner")
-            painter.drawEllipse(self.mouse_pos, 6, 6)
-
-    def mousePressEvent(self, event):
-        pass
-
-    def run(self):
-        self.listener = pynput_mouse.Listener(
-            on_click=lambda x, y, button, pressed: self._on_click(x, y, button, pressed) if pressed else None)
-        self.listener.start()
-        self.show()
-        self.setFocus()
-        self.raise_()
-        self.activateWindow()
-        while self.isVisible():
-            QApplication.processEvents()
-        if self.listener.is_alive():
-            self.listener.stop()
-        self.listener.join(timeout=1)
-
-    def _on_click(self, x, y, button, pressed):
-        if pressed:
-            pos = QPoint(x, y)
-            if self.is_first_click:
-                self.corner1 = pos
-                self.is_first_click = False
-                self.update()
-            else:
-                self.corner2 = pos
-                if self.listener.is_alive():
-                    self.listener.stop()
-                self.close()
-
-
-class MouseClickEvent:
-    def __init__(self, pos):
-        self._pos = pos
-
-    def pos(self):
-        return self._pos
-
-
-class PointSelector:
-    def run(self):
-        self._result = None
-        self._click_pos = None
-
-        def on_click(x, y, button, pressed):
-            if pressed:
-                self._click_pos = QPoint(x, y)
-                return False
-
-        listener = pynput_mouse.Listener(on_click=on_click)
-        listener.start()
-        listener.join()
-
-        if self._click_pos:
-            self._result = self._click_pos
-        return self._result
 
 
 class LiveVisualizerWidget(QWidget):
@@ -128,10 +33,10 @@ class LiveVisualizerWidget(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setGeometry(QApplication.desktop().screenGeometry())
+        self.setGeometry(QApplication.primaryScreen().geometry())
         self._skill_states = {}
         self._cached_cls_cfg = {}
-        self._cached_hp_vals = None
+        self._cached_shared = {}
         self._cast_tracker = None
         self._last_config_read = 0.0
         self._refresh_timer = QTimer(self)
@@ -152,8 +57,12 @@ class LiveVisualizerWidget(QWidget):
             now = _time.time()
             if now - self._last_config_read >= 2.0:
                 self._last_config_read = now
-                self._cached_hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
-                current_class = config_helper.get_shared_config('class', 'Paladin')
+                shared = {}
+                for k in ('hp_orb_center', 'hp_orb_radius', 'hp_orb_empty_color', 'hp_orb_tolerance',
+                          'resource_orb_center', 'resource_orb_radius', 'resource_orb_empty_color', 'resource_orb_tolerance'):
+                    shared[k] = config_helper.get_shared_config(k)
+                self._cached_shared = shared
+                current_class = config_helper.get_current_class()
                 self._cached_cls_cfg = config_helper.get_class_config(current_class)
         except Exception as ex:
             logging_helper.log_debug(f"LiveVisualizer._update_states error: {ex}")
@@ -163,46 +72,64 @@ class LiveVisualizerWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        hp_vals = self._cached_hp_vals
-        if hp_vals and len(hp_vals) >= 2:
-            hx, hy = hp_vals[0], hp_vals[1]
-            hp_colors = hp_vals[2] if len(hp_vals) > 2 and isinstance(hp_vals[2], list) else [[95, 10, 15]]
-            if hp_colors and isinstance(hp_colors[0], (int, float)):
-                hp_colors = [hp_colors]
-            hp_ratio = 0.5
-            for c in hp_colors:
-                if len(c) >= 3 and image_helper.pixel_matches_color(hx, hy, c[0], c[1], c[2], 45):
-                    hp_ratio = 1.0
-                    break
-            hp_color = QColor(int(255 * (1 - hp_ratio)), int(255 * hp_ratio), 0)
-            self._draw_crosshair(painter, hx, hy, hp_color, f"HP {int(hp_ratio*100)}%")
+        shared = self._cached_shared
+        hp_center = shared.get('hp_orb_center')
+        hp_radius = shared.get('hp_orb_radius') or 0
+        hp_empty_color = shared.get('hp_orb_empty_color')
+        hp_tolerance = shared.get('hp_orb_tolerance') or 45
+        if hp_center and hp_radius > 0 and hp_empty_color:
+            cx, cy = hp_center if isinstance(hp_center, (list, tuple)) else (hp_center[0], hp_center[1])
+            er, eg, eb = hp_empty_color if isinstance(hp_empty_color, (list, tuple)) else (hp_empty_color[0], hp_empty_color[1], hp_empty_color[2])
+            fill = image_helper.read_orb_fill_percentage(cx, cy, hp_radius, er, eg, eb, hp_tolerance)
+            hp_color = QColor(int(255 * (1 - fill)), int(255 * fill), 0)
+            self._draw_orb_indicator(painter, cx, cy, hp_radius, hp_color, f"HP {int(fill * 100)}%")
+
+        res_center = shared.get('resource_orb_center')
+        res_radius = shared.get('resource_orb_radius') or 0
+        res_empty_color = shared.get('resource_orb_empty_color')
+        res_tolerance = shared.get('resource_orb_tolerance') or 45
+        if res_center and res_radius > 0 and res_empty_color:
+            cx, cy = res_center if isinstance(res_center, (list, tuple)) else (res_center[0], res_center[1])
+            er, eg, eb = res_empty_color if isinstance(res_empty_color, (list, tuple)) else (res_empty_color[0], res_empty_color[1], res_empty_color[2])
+            fill = image_helper.read_orb_fill_percentage(cx, cy, res_radius, er, eg, eb, res_tolerance)
+            res_color = QColor(0, int(200 * fill), int(255 * fill))
+            self._draw_orb_indicator(painter, cx, cy, res_radius, res_color, f"RES {int(fill * 100)}%")
 
         label_map = {
             'skill1': 'S1', 'skill2': 'S2', 'skill3': 'S3',
             'skill4': 'S4', 'skill5': 'S5', 'skill6': 'S6', 'pot': 'POT', 'evade': 'EVADE'
         }
 
-        for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
+        for key in config_helper.SKILL_SLOTS:
             pos = self._cached_cls_cfg.get(f'{key}_pos')
             if not pos or len(pos) < 4:
                 continue
-
             x, y, w, h = pos[0], pos[1], pos[2], pos[3]
-            state = self._skill_states.get(key, 'cd')
-
+            state_info = self._skill_states.get(key, {})
+            state = state_info.get('state', 'cd') if isinstance(state_info, dict) else 'cd'
+            mode = state_info.get('mode', '') if isinstance(state_info, dict) else ''
             cast_tracker = self._get_cast_tracker()
             if cast_tracker and cast_tracker.is_flashing(key):
                 state = 'casting'
-
             fill_color = self.STATE_COLORS.get(state, self.STATE_COLORS['cd'])
-            border_color = getattr(self.STATE_COLORS, f'{state}_border', QColor(255, 0, 0))
-
+            border_color = self.STATE_COLORS.get(f'{state}_border', self.STATE_COLORS['cd_border'])
             painter.setPen(QPen(border_color, 3))
             painter.setBrush(QBrush(fill_color))
             painter.drawRect(x, y, w, h)
-            self._draw_label(painter, f"{label_map.get(key, key.upper())}:{state.upper()}", x, y - 15, border_color)
+            label_text = f"{label_map.get(key, key.upper())}:{state.upper()}"
+            if mode:
+                label_text += f":{mode}"
+            self._draw_label(painter, label_text, x, y - 15, border_color)
 
         self._draw_legend(painter)
+
+    def _draw_orb_indicator(self, painter, cx, cy, radius, color, label):
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(QBrush(QColor(color.red(), color.green(), color.blue(), 40)))
+        painter.drawEllipse(QPoint(cx, cy), radius, radius)
+        painter.drawLine(cx - radius, cy, cx + radius, cy)
+        painter.drawLine(cx, cy - radius, cx, cy + radius)
+        self._draw_label(painter, label, cx + radius + 5, cy - 5, color)
 
     def _draw_legend(self, painter):
         legend_x = 20
@@ -226,20 +153,13 @@ class LiveVisualizerWidget(QWidget):
             painter.setPen(QPen(Qt.white, 1))
             painter.drawText(legend_x + 20, y + 12, label)
 
-    def _draw_crosshair(self, painter, x, y, color, label):
-        painter.setPen(QPen(color, 2))
-        painter.drawLine(x - 8, y, x + 8, y)
-        painter.drawLine(x, y - 8, x, y + 8)
-        painter.drawEllipse(x - 4, y - 4, 8, 8)
-        self._draw_label(painter, label, x + 8, y - 15, color)
-
     def _draw_label(self, painter, text, x, y, color):
         painter.setPen(QPen(Qt.white, 1))
         painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
         font = painter.font()
         font.setPointSize(9)
         painter.setFont(font)
-        bg_rect = QRect(x - 2, y - 14, painter.fontMetrics().width(text) + 6, 16)
+        bg_rect = QRect(x - 2, y - 14, painter.fontMetrics().horizontalAdvance(text) + 6, 16)
         painter.drawRect(bg_rect)
         painter.drawText(x + 2, y, text)
 
@@ -252,36 +172,49 @@ class ConfigVisualizer(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setGeometry(QApplication.desktop().screenGeometry())
-        self.cfg = config_helper.read_config()
-        self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self.update)
-        self._refresh_timer.start(100)
+        self.setGeometry(QApplication.primaryScreen().geometry())
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
-        if hp_vals and len(hp_vals) >= 2:
-            hx, hy = hp_vals[0], hp_vals[1]
-            painter.setPen(QPen(QColor(255, 255, 0), 2))
-            painter.drawLine(hx - 8, hy, hx + 8, hy)
-            painter.drawLine(hx, hy - 8, hx, hy + 8)
-            self._draw_label(painter, "HP PIXEL", hx + 10, hy - 10, QColor(255, 255, 0))
+        shared_cfg = config_helper.read_config()
+
+        hp_center = config_helper.get_shared_config('hp_orb_center')
+        hp_radius = config_helper.get_shared_config('hp_orb_radius') or 0
+        if hp_center and hp_radius > 0:
+            cx, cy = hp_center if isinstance(hp_center, (list, tuple)) else (hp_center[0], hp_center[1])
+            painter.setPen(QPen(QColor(255, 50, 50), 2))
+            painter.setBrush(QBrush(QColor(255, 50, 50, 30)))
+            painter.drawEllipse(QPoint(cx, cy), hp_radius, hp_radius)
+            painter.drawLine(cx - hp_radius, cy, cx + hp_radius, cy)
+            painter.drawLine(cx, cy - hp_radius, cx, cy + hp_radius)
+            self._draw_label(painter, "HP Orb", cx + hp_radius + 5, cy - 5, QColor(255, 100, 100))
+
+        res_center = config_helper.get_shared_config('resource_orb_center')
+        res_radius = config_helper.get_shared_config('resource_orb_radius') or 0
+        if res_center and res_radius > 0:
+            cx, cy = res_center if isinstance(res_center, (list, tuple)) else (res_center[0], res_center[1])
+            painter.setPen(QPen(QColor(50, 150, 255), 2))
+            painter.setBrush(QBrush(QColor(50, 150, 255, 30)))
+            painter.drawEllipse(QPoint(cx, cy), res_radius, res_radius)
+            painter.drawLine(cx - res_radius, cy, cx + res_radius, cy)
+            painter.drawLine(cx, cy - res_radius, cx, cy + res_radius)
+            self._draw_label(painter, "Resource Orb", cx + res_radius + 5, cy - 5, QColor(100, 180, 255))
 
         skill_labels = {
             'skill1': 'Skill 1', 'skill2': 'Skill 2', 'skill3': 'Skill 3',
             'skill4': 'Skill 4', 'skill5': 'Skill 5', 'skill6': 'Skill 6',
             'pot': 'Potion', 'evade': 'Evade'
         }
-        current_class = config_helper.get_shared_config('class', 'Paladin')
+        current_class = config_helper.get_current_class()
         cls_cfg = config_helper.get_class_config(current_class)
         for key, label in skill_labels.items():
             vals = cls_cfg.get(f'{key}_pos')
             if vals and len(vals) >= 4:
                 x, y, w, h = vals[0], vals[1], vals[2], vals[3]
                 painter.setPen(QPen(QColor(255, 0, 255), 2))
+                painter.setBrush(QBrush(QColor(255, 0, 255, 30)))
                 painter.drawRect(x, y, w, h)
                 self._draw_label(painter, label, x + 5, y + h // 2, QColor(255, 0, 255))
 
@@ -291,9 +224,13 @@ class ConfigVisualizer(QWidget):
         font = painter.font()
         font.setPointSize(9)
         painter.setFont(font)
-        bg_rect = QRect(x - 2, y - 14, painter.fontMetrics().width(text) + 6, 16)
+        bg_rect = QRect(x - 2, y - 14, painter.fontMetrics().horizontalAdvance(text) + 6, 16)
         painter.drawRect(bg_rect)
         painter.drawText(x + 2, y, text)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.close()
 
     def mousePressEvent(self, event):
         self.close()
@@ -309,222 +246,497 @@ class ConfigVisualizer(QWidget):
         self.releaseMouse()
 
 
+class _OrbFillBar(QWidget):
+    def __init__(self, color_hue='green', parent=None):
+        super().__init__(parent)
+        self._fill = 0.0
+        self._color_hue = color_hue
+        self.setFixedSize(200, 16)
+
+    def set_fill(self, value):
+        self._fill = max(0.0, min(1.0, value))
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(80, 80, 100, 150), 1))
+        painter.setBrush(QBrush(QColor(30, 30, 40, 200)))
+        painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
+        if self._fill > 0:
+            bar_w = int((self.width() - 2) * self._fill)
+            if self._color_hue == 'green':
+                color = QColor(0, 200, 80, 220)
+            else:
+                color = QColor(50, 150, 255, 220)
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.NoPen)
+            painter.drawRect(1, 1, bar_w, self.height() - 2)
+
+
 class Toolbox(QDialog):
     def __init__(self, parent=None):
         super(Toolbox, self).__init__(parent)
         self.running = False
-        self.cfg = config_helper.read_config()
-        self.name = self.cfg.get('apptitle', 'notepad')
         self._live_viz = None
 
         try:
-            self.setWindowIcon(QIcon('.\\assets\\layout\\mmorpg_helper.ico'))
-            self.pixmap = QPixmap('.\\assets\\layout\\mmorpg_helper_background.png')
+            self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "assets" / "layout" / "mmorpg_helper.ico")))
         except Exception as e:
-            logging_helper.log_error(f"Error loading resources: {e}")
-            self.pixmap = QPixmap()
+            logging_helper.log_error(f"Error loading icon: {e}")
 
         QApplication.setStyle(QStyleFactory.create('Fusion'))
-        self.setWindowTitle(self.name)
-        self.setGeometry(700, 300, 600, 520)
-        self.setMinimumSize(600, 520)
+        self.setWindowTitle(config_helper.get_shared_config('apptitle', 'Diablo IV Helper'))
+        self.setGeometry(100, 100, 820, 720)
+        self.setMinimumSize(820, 720)
+        self.setStyleSheet(TOOLBOX_STYLESHEET)
 
-        self.label = QLabel(self)
-        self.label.setPixmap(self.pixmap)
-        self.label.resize(self.pixmap.width(), self.pixmap.height())
+        add_hotkey('end', lambda: self._exit_app())
 
-        add_hotkey('end', lambda: self.on_press('exit'))
-
-        self.createConfigBox()
+        self._build_ui()
         self.load_config_to_fields()
 
-        mainLayout = QGridLayout()
-        mainLayout.addWidget(self.configBox, 0, 0)
-        self.setLayout(mainLayout)
-
-    def on_press(self, key):
-        if key == 'exit':
-            self.exit_app()
-        else:
-            logging_helper.log_error(f"Unknown key: {key}")
-
-    def exit_app(self):
-        logging_helper.log_info("Exiting application")
+    def _exit_app(self):
         QApplication.quit()
 
-    def createConfigBox(self):
-        self.configBox = QGroupBox('Game Config')
-        self.configBox.setStyleSheet('QGroupBox:title {color: rgb(0,255,0);}')
-        layout = QGridLayout()
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
 
-        common_style = 'background:rgb(204,153,51);'
-        label_style = 'color: rgb(0,255,0);'
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_skills_tab(), "Skills & Input")
+        self._tabs.addTab(self._build_macro_tab(), "Macro Rules")
+        self._tabs.addTab(self._build_bar_setup_tab(), "Bar Setup")
+        root.addWidget(self._tabs, 1)
+        root.addWidget(self._build_bottom_bar())
 
-        self.cfg = config_helper.read_config()
+    def _build_skills_tab(self):
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setSpacing(4)
+        for key in config_helper.SKILL_SLOTS:
+            layout.addWidget(self._build_skill_row(key))
+        layout.addStretch()
+        return container
 
-        layout.addWidget(QLabel('HP Detection:'), 0, 0)
-        layout.addWidget(self._make_hp_row(common_style, label_style), 1, 0, 1, 4)
+    def _build_skill_row(self, key):
+        group = QGroupBox(self._slot_label(key))
+        row = QHBoxLayout(group)
+        row.setContentsMargins(8, 6, 8, 6)
 
-        layout.addWidget(QLabel('Skills & Utility:'), 2, 0)
-        layout.addWidget(self._make_skill_row('skill1', 'q', (801, 45), 'Skill 1', common_style, label_style), 3, 0, 1, 4)
-        layout.addWidget(self._make_skill_row('skill2', 'w', (710, 45), 'Skill 2', common_style, label_style), 4, 0, 1, 4)
-        layout.addWidget(self._make_skill_row('skill3', 'e', (619, 45), 'Skill 3', common_style, label_style), 5, 0, 1, 4)
-        layout.addWidget(self._make_skill_row('skill4', 'r', (528, 45), 'Skill 4', common_style, label_style), 6, 0, 1, 4)
-        layout.addWidget(self._make_skill_row('skill5', 'leftclick', (890, 45), 'Skill 5 (LMouse)', common_style, label_style), 7, 0, 1, 4)
-        layout.addWidget(self._make_skill_row('skill6', 'rightclick', (980, 45), 'Skill 6 (RMouse)', common_style, label_style), 8, 0, 1, 4)
-        layout.addWidget(self._make_skill_row('pot', '2', (437, 45), 'Potion', common_style, label_style), 9, 0, 1, 4)
-        layout.addWidget(self._make_skill_row('evade', 'space', (346, 45), 'Evade', common_style, label_style), 10, 0, 1, 4)
+        cb = QCheckBox("Enabled")
+        cb.setObjectName(f'skill_{key}_enabled')
+        cb.setChecked(True)
+        row.addWidget(cb)
 
-        layout.addWidget(QLabel('Rotation Hotkey:'), 13, 0)
-        self._hotkey_btn = QPushButton(str(self.cfg.get('rotation_hotkey', 'f6')))
-        self._hotkey_btn.setStyleSheet('background:rgb(204,153,51); color: #e0e0e0; padding: 2px 8px;')
-        self._hotkey_btn.setFixedSize(120, 24)
-        self._hotkey_btn.setObjectName('rotation_hotkey_btn')
-        self._hotkey_btn.setToolTip('Click to capture a key or mouse button')
-        self._hotkey_btn.clicked.connect(self._capture_hotkey)
-        layout.addWidget(self._hotkey_btn, 13, 1)
+        row.addWidget(QLabel("Key:"))
+        key_ed = QLineEdit()
+        key_ed.setFixedSize(70, 24)
+        key_ed.setObjectName(f'skill_{key}_key')
+        row.addWidget(key_ed)
 
-        loadBtn = QPushButton('LOAD FROM CONFIG')
-        loadBtn.clicked.connect(self.load_config_to_fields)
-        saveBtn = QPushButton('SAVE TO CONFIG')
-        saveBtn.clicked.connect(self.save_fields_to_config)
-        vizBtn = QPushButton('VISUALIZE')
-        vizBtn.clicked.connect(self.visualize_config)
+        row.addWidget(QLabel("X:"))
+        x_sp = QSpinBox()
+        x_sp.setRange(0, 9999)
+        x_sp.setFixedSize(65, 24)
+        x_sp.setObjectName(f'skill_{key}_x')
+        row.addWidget(x_sp)
 
-        self.liveVizCheck = QCheckBox('Live Visualize')
-        self.liveVizCheck.setStyleSheet('color: rgb(0,255,0);')
+        row.addWidget(QLabel("Y:"))
+        y_sp = QSpinBox()
+        y_sp.setRange(0, 9999)
+        y_sp.setFixedSize(65, 24)
+        y_sp.setObjectName(f'skill_{key}_y')
+        row.addWidget(y_sp)
+
+        row.addWidget(QLabel("W:"))
+        w_sp = QSpinBox()
+        w_sp.setRange(0, 9999)
+        w_sp.setFixedSize(55, 24)
+        w_sp.setObjectName(f'skill_{key}_w')
+        row.addWidget(w_sp)
+
+        row.addWidget(QLabel("H:"))
+        h_sp = QSpinBox()
+        h_sp.setRange(0, 9999)
+        h_sp.setFixedSize(55, 24)
+        h_sp.setObjectName(f'skill_{key}_h')
+        row.addWidget(h_sp)
+
+        set_btn = QPushButton("SET")
+        set_btn.setFixedSize(45, 24)
+        set_btn.key = key
+        set_btn.clicked.connect(self.select_skill_pos)
+        row.addWidget(set_btn)
+
+        row.addStretch()
+        return group
+
+    def _build_macro_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setSpacing(4)
+
+        for key in config_helper.SKILL_SLOTS:
+            layout.addWidget(self._build_macro_section(key))
+        layout.addStretch()
+        scroll.setWidget(inner)
+        return scroll
+
+    def _build_macro_section(self, key):
+        group = QGroupBox(self._slot_label(key))
+        group.setCheckable(True)
+        group.setChecked(True)
+        group.setObjectName(f'macro_group_{key}')
+        vbox = QVBoxLayout(group)
+        vbox.setContentsMargins(8, 18, 8, 8)
+        vbox.setSpacing(4)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Mode:"))
+        mode_cb = QComboBox()
+        mode_cb.addItems(['ready', 'delay', 'filler', 'hp_guard', 'resource_guard'])
+        mode_cb.setObjectName(f'macro_{key}_mode')
+        mode_cb.currentTextChanged.connect(lambda text, k=key: self._update_macro_title(k))
+        row1.addWidget(mode_cb)
+
+        row1.addWidget(QLabel("Priority:"))
+        pri_sp = QSpinBox()
+        pri_sp.setRange(1, 8)
+        pri_sp.setObjectName(f'macro_{key}_priority')
+        pri_sp.valueChanged.connect(lambda val, k=key: self._update_macro_title(k))
+        row1.addWidget(pri_sp)
+
+        row1.addWidget(QLabel("Chain:"))
+        chain_items = ['none'] + [s for s in config_helper.SKILL_SLOTS if s not in ('pot', 'evade')]
+        chain_cb = QComboBox()
+        chain_cb.addItems(chain_items)
+        chain_cb.setObjectName(f'macro_{key}_chain_next')
+        row1.addWidget(chain_cb)
+
+        row1.addWidget(QLabel("Delay:"))
+        chain_delay = QDoubleSpinBox()
+        chain_delay.setRange(0.0, 5.0)
+        chain_delay.setSingleStep(0.05)
+        chain_delay.setDecimals(2)
+        chain_delay.setObjectName(f'macro_{key}_chain_delay')
+        chain_delay.setSuffix(" s")
+        row1.addWidget(chain_delay)
+        row1.addStretch()
+        vbox.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Cast Delay"))
+        row2.addWidget(QLabel("Min:"))
+        delay_min = QDoubleSpinBox()
+        delay_min.setRange(0.0, 60.0)
+        delay_min.setSingleStep(0.1)
+        delay_min.setDecimals(1)
+        delay_min.setObjectName(f'macro_{key}_delay_min')
+        delay_min.setSuffix(" s")
+        row2.addWidget(delay_min)
+        row2.addWidget(QLabel("Max:"))
+        delay_max = QDoubleSpinBox()
+        delay_max.setRange(0.0, 60.0)
+        delay_max.setSingleStep(0.1)
+        delay_max.setDecimals(1)
+        delay_max.setObjectName(f'macro_{key}_delay_max')
+        delay_max.setSuffix(" s")
+        row2.addWidget(delay_max)
+        row2.addStretch()
+        vbox.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("HP Threshold"))
+        row3.addWidget(QLabel("Min:"))
+        hp_min = QSpinBox()
+        hp_min.setRange(0, 100)
+        hp_min.setSingleStep(5)
+        hp_min.setObjectName(f'macro_{key}_hp_min')
+        hp_min.setSuffix(" %")
+        row3.addWidget(hp_min)
+        row3.addWidget(QLabel("Max:"))
+        hp_max = QSpinBox()
+        hp_max.setRange(0, 100)
+        hp_max.setSingleStep(5)
+        hp_max.setObjectName(f'macro_{key}_hp_max')
+        hp_max.setSuffix(" %")
+        row3.addWidget(hp_max)
+        row3.addStretch()
+        vbox.addLayout(row3)
+
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("Resource"))
+        row4.addWidget(QLabel("Min:"))
+        res_min = QSpinBox()
+        res_min.setRange(0, 100)
+        res_min.setSingleStep(5)
+        res_min.setObjectName(f'macro_{key}_resource_min')
+        res_min.setSuffix(" %")
+        row4.addWidget(res_min)
+        row4.addWidget(QLabel("Max:"))
+        res_max = QSpinBox()
+        res_max.setRange(0, 100)
+        res_max.setSingleStep(5)
+        res_max.setObjectName(f'macro_{key}_resource_max')
+        res_max.setSuffix(" %")
+        row4.addWidget(res_max)
+        row4.addStretch()
+        vbox.addLayout(row4)
+
+        return group
+
+    def _update_macro_title(self, key):
+        group = self.findChild(QGroupBox, f'macro_group_{key}')
+        mode_cb = self.findChild(QComboBox, f'macro_{key}_mode')
+        pri_sp = self.findChild(QSpinBox, f'macro_{key}_priority')
+        if group and mode_cb and pri_sp:
+            mode = mode_cb.currentText()
+            pri = pri_sp.value()
+            group.setTitle(f"{self._slot_label(key)}  —  {mode}, pri:{pri}")
+
+    def _build_bar_setup_tab(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setSpacing(8)
+
+        layout.addWidget(self._build_orb_group('hp'))
+        layout.addWidget(self._build_orb_group('resource'))
+        layout.addWidget(self._build_orb_info_box())
+        layout.addStretch()
+        scroll.setWidget(inner)
+        return scroll
+
+    def _build_orb_group(self, orb_type):
+        prefix = orb_type
+        title = "HP Orb" if orb_type == 'hp' else "Resource Orb"
+        fill_color = 'green' if orb_type == 'hp' else 'blue'
+        group = QGroupBox(title)
+        vbox = QVBoxLayout(group)
+        vbox.setContentsMargins(8, 18, 8, 8)
+        vbox.setSpacing(4)
+
+        row_center = QHBoxLayout()
+        row_center.addWidget(QLabel("Center X:"))
+        cx = QSpinBox()
+        cx.setRange(0, 9999)
+        cx.setObjectName(f'{prefix}_orb_center_x')
+        row_center.addWidget(cx)
+        row_center.addWidget(QLabel("Y:"))
+        cy = QSpinBox()
+        cy.setRange(0, 9999)
+        cy.setObjectName(f'{prefix}_orb_center_y')
+        row_center.addWidget(cy)
+        row_center.addWidget(QLabel("Radius:"))
+        rad = QSpinBox()
+        rad.setRange(0, 999)
+        rad.setObjectName(f'{prefix}_orb_radius')
+        row_center.addWidget(rad)
+        set_orb_btn = QPushButton("SET ORB")
+        set_orb_btn.orb_type = orb_type
+        set_orb_btn.clicked.connect(lambda checked, t=orb_type: self.select_orb(t))
+        row_center.addWidget(set_orb_btn)
+        row_center.addStretch()
+        vbox.addLayout(row_center)
+
+        row_color = QHBoxLayout()
+        row_color.addWidget(QLabel("Empty Color R:"))
+        er = QSpinBox()
+        er.setRange(0, 255)
+        er.setObjectName(f'{prefix}_empty_r')
+        row_color.addWidget(er)
+        row_color.addWidget(QLabel("G:"))
+        eg = QSpinBox()
+        eg.setRange(0, 255)
+        eg.setObjectName(f'{prefix}_empty_g')
+        row_color.addWidget(eg)
+        row_color.addWidget(QLabel("B:"))
+        eb = QSpinBox()
+        eb.setRange(0, 255)
+        eb.setObjectName(f'{prefix}_empty_b')
+        row_color.addWidget(eb)
+        row_color.addWidget(QLabel("Tol:"))
+        tol = QSpinBox()
+        tol.setRange(0, 100)
+        tol.setObjectName(f'{prefix}_tolerance')
+        row_color.addWidget(tol)
+        sample_btn = QPushButton("SAMPLE EMPTY COLOR")
+        sample_btn.orb_type = orb_type
+        sample_btn.clicked.connect(lambda checked, t=orb_type: self.sample_empty_color(t))
+        row_color.addWidget(sample_btn)
+        row_color.addStretch()
+        vbox.addLayout(row_color)
+
+        row_reading = QHBoxLayout()
+        row_reading.addWidget(QLabel("Current Reading:"))
+        fill_bar = _OrbFillBar(color_hue=fill_color)
+        fill_bar.setObjectName(f'{prefix}_fill_bar')
+        row_reading.addWidget(fill_bar)
+        fill_label = QLabel("-- %")
+        fill_label.setObjectName(f'{prefix}_fill_label')
+        fill_label.setMinimumWidth(50)
+        row_reading.addWidget(fill_label)
+        test_btn = QPushButton("TEST")
+        test_btn.orb_type = orb_type
+        test_btn.clicked.connect(lambda checked, t=orb_type: self.test_orb(t))
+        row_reading.addWidget(test_btn)
+        row_reading.addStretch()
+        vbox.addLayout(row_reading)
+
+        return group
+
+    def _build_orb_info_box(self):
+        group = QGroupBox("Orb Detection Info")
+        vbox = QVBoxLayout(group)
+        vbox.setContentsMargins(8, 18, 8, 8)
+        info = QLabel(
+            "The orb detection system samples circular regions on screen.\n"
+            "Use SET ORB to drag-select a circle over the HP or Resource orb.\n"
+            "SAMPLE EMPTY COLOR reads the bottom of the orb to determine the 'empty' color.\n"
+            "TEST reads the current fill percentage using the configured empty color and tolerance.\n"
+            "Tolerance controls how closely a pixel must match the empty color (higher = more lenient)."
+        )
+        info.setWordWrap(True)
+        vbox.addWidget(info)
+        return group
+
+    def _build_bottom_bar(self):
+        bar = QWidget()
+        bar.setFixedHeight(50)
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(4, 4, 4, 4)
+
+        load_btn = QPushButton("LOAD FROM CONFIG")
+        load_btn.clicked.connect(self.load_config_to_fields)
+        row.addWidget(load_btn)
+
+        save_btn = QPushButton("SAVE TO CONFIG")
+        save_btn.clicked.connect(self.save_fields_to_config)
+        row.addWidget(save_btn)
+
+        row.addSpacing(20)
+
+        viz_btn = QPushButton("VISUALIZE")
+        viz_btn.clicked.connect(self.visualize_config)
+        row.addWidget(viz_btn)
+
+        self.liveVizCheck = QCheckBox("Live Viz")
         self.liveVizCheck.stateChanged.connect(self.on_live_viz_toggled)
+        row.addWidget(self.liveVizCheck)
 
-        layout.addWidget(loadBtn, 14, 0)
-        layout.addWidget(saveBtn, 14, 1)
-        layout.addWidget(vizBtn, 14, 2)
-        layout.addWidget(self.liveVizCheck, 14, 3)
+        row.addSpacing(20)
 
-        self.configBox.setLayout(layout)
+        row.addWidget(QLabel("Rotation Hotkey:"))
+        self._hotkey_btn = QPushButton("f6")
+        self._hotkey_btn.setFixedSize(100, 28)
+        self._hotkey_btn.setObjectName('rotation_hotkey_btn')
+        self._hotkey_btn.clicked.connect(self._capture_hotkey)
+        row.addWidget(self._hotkey_btn)
+
+        capture_btn = QPushButton("CAPTURE")
+        capture_btn.clicked.connect(self._capture_hotkey)
+        row.addWidget(capture_btn)
+
+        row.addStretch()
+        return bar
+
+    @staticmethod
+    def _slot_label(key):
+        labels = {
+            'skill1': 'Skill 1', 'skill2': 'Skill 2', 'skill3': 'Skill 3',
+            'skill4': 'Skill 4', 'skill5': 'Skill 5', 'skill6': 'Skill 6',
+            'pot': 'Potion', 'evade': 'Evade',
+        }
+        return labels.get(key, key)
+
+    def select_skill_pos(self):
+        sender = self.sender()
+        key = sender.key
+        selector = RectDragSelector()
+        result = selector.run()
+        if result:
+            self._find_spin_set(f'skill_{key}_x', result.left())
+            self._find_spin_set(f'skill_{key}_y', result.top())
+            self._find_spin_set(f'skill_{key}_w', result.width())
+            self._find_spin_set(f'skill_{key}_h', result.height())
+            logging_helper.log_info(f"Selected skill {key} region at {result.left()},{result.top()} {result.width()}x{result.height()}")
+
+    def select_orb(self, orb_type):
+        selector = CircleDragSelector()
+        result = selector.run()
+        if result:
+            center, radius = result
+            prefix = orb_type
+            self._find_spin_set(f'{prefix}_orb_center_x', center.x())
+            self._find_spin_set(f'{prefix}_orb_center_y', center.y())
+            self._find_spin_set(f'{prefix}_orb_radius', radius)
+            logging_helper.log_info(f"Selected {orb_type} orb at {center.x()},{center.y()} r={radius}")
+
+    def sample_empty_color(self, orb_type):
+        prefix = orb_type
+        cx_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_x')
+        cy_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_y')
+        rad_sp = self.findChild(QSpinBox, f'{prefix}_orb_radius')
+        if not cx_sp or not cy_sp or not rad_sp:
+            return
+        cx_val = cx_sp.value()
+        cy_val = cy_sp.value()
+        rad_val = rad_sp.value()
+        if rad_val <= 0:
+            logging_helper.log_debug(f"Cannot sample {orb_type} orb: radius is 0")
+            return
+        r, g, b = image_helper.sample_orb_empty_color(cx_val, cy_val, rad_val)
+        self._find_spin_set(f'{prefix}_empty_r', r)
+        self._find_spin_set(f'{prefix}_empty_g', g)
+        self._find_spin_set(f'{prefix}_empty_b', b)
+        logging_helper.log_info(f"Sampled {orb_type} orb empty color: ({r},{g},{b})")
+
+    def test_orb(self, orb_type):
+        prefix = orb_type
+        cx_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_x')
+        cy_sp = self.findChild(QSpinBox, f'{prefix}_orb_center_y')
+        rad_sp = self.findChild(QSpinBox, f'{prefix}_orb_radius')
+        er_sp = self.findChild(QSpinBox, f'{prefix}_empty_r')
+        eg_sp = self.findChild(QSpinBox, f'{prefix}_empty_g')
+        eb_sp = self.findChild(QSpinBox, f'{prefix}_empty_b')
+        tol_sp = self.findChild(QSpinBox, f'{prefix}_tolerance')
+        if not all([cx_sp, cy_sp, rad_sp, er_sp, eg_sp, eb_sp]):
+            return
+        fill = image_helper.read_orb_fill_percentage(
+            cx_sp.value(), cy_sp.value(), rad_sp.value(),
+            er_sp.value(), eg_sp.value(), eb_sp.value(),
+            tol_sp.value() if tol_sp else 45
+        )
+        fill_bar = self.findChild(_OrbFillBar, f'{prefix}_fill_bar')
+        fill_label = self.findChild(QLabel, f'{prefix}_fill_label')
+        if fill_bar:
+            fill_bar.set_fill(fill)
+        if fill_label:
+            fill_label.setText(f"{int(fill * 100)} %")
+
+    def visualize_config(self):
+        viz = ConfigVisualizer()
+        viz.run()
 
     def on_live_viz_toggled(self, state):
         if state == Qt.Checked:
-            if not hasattr(self, '_live_viz') or not self._live_viz:
+            if not self._live_viz:
                 self._live_viz = LiveVisualizerWidget()
             self._live_viz.show()
         else:
-            if hasattr(self, '_live_viz') and self._live_viz:
+            if self._live_viz:
                 self._live_viz.close()
-
-    def _make_coord_row(self, args, idx):
-        key, default, label_text, style, lbl_style = args
-        container = QWidget()
-        layout = QHBoxLayout()
-
-        lbl = QLabel(label_text)
-        lbl.setStyleSheet(lbl_style)
-
-        vals = self.cfg.get(key, default)
-        x, y, w, h = vals if len(vals) == 4 else default
-
-        x_ed = QLineEdit(str(x))
-        x_ed.setStyleSheet(style)
-        x_ed.setFixedSize(50, 20)
-        x_ed.setValidator(QIntValidator())
-        x_ed.setObjectName(f'coord_{idx}_x')
-
-        y_ed = QLineEdit(str(y))
-        y_ed.setStyleSheet(style)
-        y_ed.setFixedSize(50, 20)
-        y_ed.setValidator(QIntValidator())
-        y_ed.setObjectName(f'coord_{idx}_y')
-
-        w_ed = QLineEdit(str(w))
-        w_ed.setStyleSheet(style)
-        w_ed.setFixedSize(50, 20)
-        w_ed.setValidator(QIntValidator())
-        w_ed.setObjectName(f'coord_{idx}_w')
-
-        h_ed = QLineEdit(str(h))
-        h_ed.setStyleSheet(style)
-        h_ed.setFixedSize(50, 20)
-        h_ed.setValidator(QIntValidator())
-        h_ed.setObjectName(f'coord_{idx}_h')
-
-        setBtn = QPushButton('SET')
-        setBtn.setStyleSheet('background:rgb(0,180,0); color:white;')
-        setBtn.setFixedSize(40, 20)
-        setBtn.key = key
-        setBtn.idx = idx
-        setBtn.clicked.connect(self.select_region)
-
-        layout.addWidget(lbl)
-        layout.addWidget(x_ed)
-        layout.addWidget(y_ed)
-        layout.addWidget(w_ed)
-        layout.addWidget(h_ed)
-        layout.addWidget(setBtn)
-        layout.addStretch(1)
-        container.setLayout(layout)
-        return container
-
-    def _make_hp_row(self, style, lbl_style):
-        container = QWidget()
-        layout = QHBoxLayout()
-
-        lbl = QLabel('HP Pixel:')
-        lbl.setStyleSheet(lbl_style)
-
-        hp_vals = self.cfg.get('hp_pixel', (608, 980, [95, 10, 15]))
-        x, y = hp_vals[0], hp_vals[1]
-        colors = hp_vals[2] if len(hp_vals) > 2 and isinstance(hp_vals[2], list) else [95, 10, 15]
-        if isinstance(colors[0], (int, float)):
-            colors = [colors]
-
-        x_ed = QLineEdit(str(x))
-        x_ed.setStyleSheet(style)
-        x_ed.setFixedSize(50, 20)
-        x_ed.setValidator(QIntValidator())
-        x_ed.setObjectName('hp_x')
-
-        y_ed = QLineEdit(str(y))
-        y_ed.setStyleSheet(style)
-        y_ed.setFixedSize(50, 20)
-        y_ed.setValidator(QIntValidator())
-        y_ed.setObjectName('hp_y')
-
-        r_ed = QLineEdit(str(colors[0][0]))
-        r_ed.setStyleSheet(style)
-        r_ed.setFixedSize(30, 20)
-        r_ed.setValidator(QIntValidator())
-        r_ed.setObjectName('hp_r')
-
-        g_ed = QLineEdit(str(colors[0][1]))
-        g_ed.setStyleSheet(style)
-        g_ed.setFixedSize(30, 20)
-        g_ed.setValidator(QIntValidator())
-        g_ed.setObjectName('hp_g')
-
-        b_ed = QLineEdit(str(colors[0][2]))
-        b_ed.setStyleSheet(style)
-        b_ed.setFixedSize(30, 20)
-        b_ed.setValidator(QIntValidator())
-        b_ed.setObjectName('hp_b')
-
-        setBtn = QPushButton('SET HP')
-        setBtn.setStyleSheet('background:rgb(180,0,0); color:white;')
-        setBtn.setFixedSize(60, 20)
-        setBtn.clicked.connect(self.select_hp_pixel)
-
-        layout.addWidget(lbl)
-        layout.addWidget(x_ed)
-        layout.addWidget(y_ed)
-        layout.addWidget(r_ed)
-        layout.addWidget(g_ed)
-        layout.addWidget(b_ed)
-        layout.addWidget(setBtn)
-        layout.addStretch(1)
-        container.setLayout(layout)
-        return container
+                self._live_viz = None
 
     def _capture_hotkey(self):
-        self._hotkey_btn.setText('Press a key or mouse button...')
-        self._hotkey_btn.setStyleSheet('background:rgb(0,120,200); color: white; padding: 2px 8px;')
+        self._hotkey_btn.setText('Press a key...')
         self._hotkey_captured = None
 
         from pynput import keyboard as pk, mouse as pm
@@ -564,205 +776,194 @@ class Toolbox(QDialog):
 
         captured = self._hotkey_captured
         self._hotkey_btn.setText(captured)
-        self._hotkey_btn.setStyleSheet('background:rgb(204,153,51); color: #e0e0e0; padding: 2px 8px;')
         logging_helper.log_info(f'Captured hotkey: {captured}')
-
-    def select_hp_pixel(self):
-        selector = PointSelector()
-        result = selector.run()
-        if result:
-            cx, cy = result.x(), result.y()
-            self._find_and_set('hp_x', str(cx))
-            self._find_and_set('hp_y', str(cy))
-            logging_helper.log_info(f"Selected HP pixel at {cx},{cy}")
-
-    def _make_skill_row(self, key, default_key, pos_default, label_text, style, lbl_style):
-        container = QWidget()
-        layout = QHBoxLayout()
-
-        cb = QCheckBox()
-        cb.setStyleSheet('QCheckBox {color: rgb(0,255,0);}')
-        cb.setObjectName(f'skill_{key}_enabled')
-        cb.setChecked(self.cfg.get(f'{key}_enabled', True))
-
-        lbl = QLabel(label_text)
-        lbl.setStyleSheet(lbl_style)
-        lbl.setFixedSize(80, 20)
-
-        key_ed = QLineEdit(str(self.cfg.get(key, default_key)))
-        key_ed.setStyleSheet(style)
-        key_ed.setFixedSize(60, 20)
-        key_ed.setObjectName(f'skill_{key}_key')
-
-        vals = self.cfg.get(f'{key}_pos', pos_default)
-        x, y, w, h = vals if len(vals) >= 4 else (*pos_default, 60, 60)
-
-        x_ed = QLineEdit(str(x))
-        x_ed.setStyleSheet(style)
-        x_ed.setFixedSize(40, 20)
-        x_ed.setValidator(QIntValidator())
-        x_ed.setObjectName(f'skill_{key}_x')
-
-        y_ed = QLineEdit(str(y))
-        y_ed.setStyleSheet(style)
-        y_ed.setFixedSize(40, 20)
-        y_ed.setValidator(QIntValidator())
-        y_ed.setObjectName(f'skill_{key}_y')
-
-        w_ed = QLineEdit(str(w))
-        w_ed.setStyleSheet(style)
-        w_ed.setFixedSize(30, 20)
-        w_ed.setValidator(QIntValidator())
-        w_ed.setObjectName(f'skill_{key}_w')
-
-        h_ed = QLineEdit(str(h))
-        h_ed.setStyleSheet(style)
-        h_ed.setFixedSize(30, 20)
-        h_ed.setValidator(QIntValidator())
-        h_ed.setObjectName(f'skill_{key}_h')
-
-        setBtn = QPushButton('SET')
-        setBtn.setStyleSheet('background:rgb(0,180,0); color:white;')
-        setBtn.setFixedSize(40, 20)
-        setBtn.key = key
-        setBtn.clicked.connect(self.select_skill_pos)
-
-        layout.addWidget(cb)
-        layout.addWidget(lbl)
-        layout.addWidget(QLabel('K:'))
-        layout.addWidget(key_ed)
-        layout.addWidget(QLabel('X:'))
-        layout.addWidget(x_ed)
-        layout.addWidget(QLabel('Y:'))
-        layout.addWidget(y_ed)
-        layout.addWidget(QLabel('W:'))
-        layout.addWidget(w_ed)
-        layout.addWidget(QLabel('H:'))
-        layout.addWidget(h_ed)
-        layout.addWidget(setBtn)
-        layout.addStretch(1)
-        container.setLayout(layout)
-        return container
-
-    def select_hp_pixel(self):
-        selector = PointSelector()
-        result = selector.run()
-        if result:
-            cx, cy = result.x(), result.y()
-            self._find_and_set('hp_x', str(cx))
-            self._find_and_set('hp_y', str(cy))
-            logging_helper.log_info(f"Selected HP pixel at {cx},{cy}")
-
-    def select_skill_pos(self):
-        sender = self.sender()
-        key = sender.key
-        selector = RegionSelector()
-        selector.run()
-        if selector.corner1 and selector.corner2:
-            rect = QRect(selector.corner1, selector.corner2).normalized()
-            self._find_and_set(f'skill_{key}_x', str(rect.left()))
-            self._find_and_set(f'skill_{key}_y', str(rect.top()))
-            self._find_and_set(f'skill_{key}_w', str(rect.width()))
-            self._find_and_set(f'skill_{key}_h', str(rect.height()))
-            logging_helper.log_info(f"Selected skill {key} region at {rect.left()},{rect.top()} {rect.width()}x{rect.height()}")
-
-    def visualize_config(self):
-        self.cfg = config_helper.read_config()
-        viz = ConfigVisualizer()
-        viz.run()
 
     def load_config_to_fields(self):
         current_class = config_helper.get_current_class()
-
-        hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
-        x, y = hp_vals[0], hp_vals[1]
-        colors = hp_vals[2] if len(hp_vals) > 2 and isinstance(hp_vals[2], list) else [95, 10, 15]
-        if isinstance(colors[0], (int, float)):
-            colors = [colors]
-        self._find_and_set('hp_x', str(x))
-        self._find_and_set('hp_y', str(y))
-        self._find_and_set('hp_r', str(colors[0][0]))
-        self._find_and_set('hp_g', str(colors[0][1]))
-        self._find_and_set('hp_b', str(colors[0][2]))
-
         cls_cfg = config_helper.get_class_config(current_class)
-        for key, default in [
-            ('skill1', 'q'),
-            ('skill2', 'w'),
-            ('skill3', 'e'),
-            ('skill4', 'r'),
-            ('skill5', 'leftclick'),
-            ('skill6', 'rightclick'),
-            ('pot', '2'),
-            ('evade', 'space'),
-        ]:
-            val = cls_cfg.get(key, default)
-            self._find_and_set(f'skill_{key}_key', str(val))
-            cb = self.configBox.findChild(QCheckBox, f'skill_{key}_enabled')
+
+        default_keys = {
+            'skill1': 'q', 'skill2': 'w', 'skill3': 'e', 'skill4': 'r',
+            'skill5': 'leftclick', 'skill6': 'rightclick', 'pot': '2', 'evade': 'space',
+        }
+        default_positions = {
+            'skill1': (801, 45, 60, 60), 'skill2': (710, 45, 60, 60),
+            'skill3': (619, 45, 60, 60), 'skill4': (528, 45, 60, 60),
+            'skill5': (890, 45, 60, 60), 'skill6': (980, 45, 60, 60),
+            'pot': (437, 45, 60, 60), 'evade': (346, 45, 60, 60),
+        }
+
+        for key in config_helper.SKILL_SLOTS:
+            key_val = cls_cfg.get(key, default_keys.get(key, ''))
+            self._find_and_set(f'skill_{key}_key', str(key_val))
+
+            cb = self.findChild(QCheckBox, f'skill_{key}_enabled')
             if cb:
                 cb.setChecked(cls_cfg.get(f'{key}_enabled', True))
 
-        for key, default in [
-            ('skill1', (801, 45, 60, 60)),
-            ('skill2', (710, 45, 60, 60)),
-            ('skill3', (619, 45, 60, 60)),
-            ('skill4', (528, 45, 60, 60)),
-            ('skill5', (890, 45, 60, 60)),
-            ('skill6', (980, 45, 60, 60)),
-            ('pot', (437, 45, 60, 60)),
-            ('evade', (346, 45, 60, 60)),
-        ]:
-            vals = cls_cfg.get(f'{key}_pos', default)
-            self._find_and_set(f'skill_{key}_x', str(vals[0]))
-            self._find_and_set(f'skill_{key}_y', str(vals[1]))
-            self._find_and_set(f'skill_{key}_w', str(vals[2] if len(vals) >= 3 else 60))
-            self._find_and_set(f'skill_{key}_h', str(vals[3] if len(vals) >= 4 else 60))
+            pos_default = default_positions.get(key, (0, 0, 60, 60))
+            vals = cls_cfg.get(f'{key}_pos', pos_default)
+            self._find_spin_set(f'skill_{key}_x', vals[0])
+            self._find_spin_set(f'skill_{key}_y', vals[1])
+            self._find_spin_set(f'skill_{key}_w', vals[2] if len(vals) >= 3 else 60)
+            self._find_spin_set(f'skill_{key}_h', vals[3] if len(vals) >= 4 else 60)
+
+        for key in config_helper.SKILL_SLOTS:
+            mode_cb = self.findChild(QComboBox, f'macro_{key}_mode')
+            if mode_cb:
+                mode_val = cls_cfg.get(f'{key}_mode', 'ready')
+                idx = mode_cb.findText(mode_val)
+                if idx >= 0:
+                    mode_cb.setCurrentIndex(idx)
+
+            pri_sp = self.findChild(QSpinBox, f'macro_{key}_priority')
+            if pri_sp:
+                pri_sp.setValue(cls_cfg.get(f'{key}_priority', 5))
+
+            chain_cb = self.findChild(QComboBox, f'macro_{key}_chain_next')
+            if chain_cb:
+                chain_val = cls_cfg.get(f'{key}_chain_next', 'none')
+                if not chain_val:
+                    chain_val = 'none'
+                idx = chain_cb.findText(chain_val)
+                if idx >= 0:
+                    chain_cb.setCurrentIndex(idx)
+
+            self._find_spin_set_d(f'macro_{key}_chain_delay', cls_cfg.get(f'{key}_chain_delay', 0.1))
+            self._find_spin_set_d(f'macro_{key}_delay_min', cls_cfg.get(f'{key}_delay_min', 0.0))
+            self._find_spin_set_d(f'macro_{key}_delay_max', cls_cfg.get(f'{key}_delay_max', 0.0))
+            self._find_spin_set(f'macro_{key}_hp_min', cls_cfg.get(f'{key}_hp_min', 0))
+            self._find_spin_set(f'macro_{key}_hp_max', cls_cfg.get(f'{key}_hp_max', 100))
+            self._find_spin_set(f'macro_{key}_resource_min', cls_cfg.get(f'{key}_resource_min', 0))
+            self._find_spin_set(f'macro_{key}_resource_max', cls_cfg.get(f'{key}_resource_max', 100))
+
+            self._update_macro_title(key)
+
+        hp_center = config_helper.get_shared_config('hp_orb_center')
+        if hp_center:
+            cx, cy = hp_center if isinstance(hp_center, (list, tuple)) else (hp_center[0], hp_center[1])
+            self._find_spin_set('hp_orb_center_x', cx)
+            self._find_spin_set('hp_orb_center_y', cy)
+        hp_radius = config_helper.get_shared_config('hp_orb_radius')
+        if hp_radius is not None:
+            self._find_spin_set('hp_orb_radius', hp_radius)
+        hp_empty_color = config_helper.get_shared_config('hp_orb_empty_color')
+        if hp_empty_color:
+            r, g, b = hp_empty_color if isinstance(hp_empty_color, (list, tuple)) else (hp_empty_color[0], hp_empty_color[1], hp_empty_color[2])
+            self._find_spin_set('hp_empty_r', r)
+            self._find_spin_set('hp_empty_g', g)
+            self._find_spin_set('hp_empty_b', b)
+        hp_tolerance = config_helper.get_shared_config('hp_orb_tolerance')
+        if hp_tolerance is not None:
+            self._find_spin_set('hp_tolerance', hp_tolerance)
+
+        res_center = config_helper.get_shared_config('resource_orb_center')
+        if res_center:
+            cx, cy = res_center if isinstance(res_center, (list, tuple)) else (res_center[0], res_center[1])
+            self._find_spin_set('resource_orb_center_x', cx)
+            self._find_spin_set('resource_orb_center_y', cy)
+        res_radius = config_helper.get_shared_config('resource_orb_radius')
+        if res_radius is not None:
+            self._find_spin_set('resource_orb_radius', res_radius)
+        res_empty_color = config_helper.get_shared_config('resource_orb_empty_color')
+        if res_empty_color:
+            r, g, b = res_empty_color if isinstance(res_empty_color, (list, tuple)) else (res_empty_color[0], res_empty_color[1], res_empty_color[2])
+            self._find_spin_set('resource_empty_r', r)
+            self._find_spin_set('resource_empty_g', g)
+            self._find_spin_set('resource_empty_b', b)
+        res_tolerance = config_helper.get_shared_config('resource_orb_tolerance')
+        if res_tolerance is not None:
+            self._find_spin_set('resource_tolerance', res_tolerance)
 
         hotkey_val = config_helper.get_shared_config('rotation_hotkey', 'f6')
         if hasattr(self, '_hotkey_btn'):
             self._hotkey_btn.setText(str(hotkey_val))
 
-        logging_helper.log_info(f'Loaded config values into fields for class: {current_class}')
+        logging_helper.log_info(f'Loaded config into fields for class: {current_class}')
 
     def save_fields_to_config(self):
         current_class = config_helper.get_current_class()
 
-        def get_val(obj_name):
-            le = self.configBox.findChild(QLineEdit, obj_name)
-            return int(le.text()) if le and le.text() else None
+        def _sv(name, default=0):
+            sp = self.findChild(QSpinBox, name)
+            return sp.value() if sp else default
 
-        def get_key_val(obj_name):
-            le = self.configBox.findChild(QLineEdit, obj_name)
-            return le.text() if le and le.text() else None
+        def _dsv(name, default=0.0):
+            sp = self.findChild(QDoubleSpinBox, name)
+            return sp.value() if sp else default
 
-        hp_r = get_val('hp_r') or 95
-        hp_g = get_val('hp_g') or 10
-        hp_b = get_val('hp_b') or 15
+        def _cv(name, default=''):
+            cb = self.findChild(QComboBox, name)
+            return cb.currentText() if cb else default
+
+        def _kv(name, default=''):
+            le = self.findChild(QLineEdit, name)
+            return le.text() if le else default
+
+        hp_center = [_sv('hp_orb_center_x'), _sv('hp_orb_center_y')]
+        hp_radius = _sv('hp_orb_radius')
+        hp_empty_color = [_sv('hp_empty_r'), _sv('hp_empty_g'), _sv('hp_empty_b')]
+        hp_tolerance = _sv('hp_tolerance', 45)
+
+        res_center = [_sv('resource_orb_center_x'), _sv('resource_orb_center_y')]
+        res_radius = _sv('resource_orb_radius')
+        res_empty_color = [_sv('resource_empty_r'), _sv('resource_empty_g'), _sv('resource_empty_b')]
+        res_tolerance = _sv('resource_tolerance', 45)
 
         shared_updates = {
-            'hp_pixel': [get_val('hp_x') or 608, get_val('hp_y') or 980, [hp_r, hp_g, hp_b]],
+            'hp_orb_center': hp_center,
+            'hp_orb_radius': hp_radius,
+            'hp_orb_empty_color': hp_empty_color,
+            'hp_orb_tolerance': hp_tolerance,
+            'resource_orb_center': res_center,
+            'resource_orb_radius': res_radius,
+            'resource_orb_empty_color': res_empty_color,
+            'resource_orb_tolerance': res_tolerance,
         }
         if hasattr(self, '_hotkey_btn') and self._hotkey_btn.text():
             shared_updates['rotation_hotkey'] = self._hotkey_btn.text()
 
         class_updates = {}
-        for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
-            class_updates[key] = get_key_val(f'skill_{key}_key')
+        for key in config_helper.SKILL_SLOTS:
+            class_updates[key] = _kv(f'skill_{key}_key')
             class_updates[f'{key}_pos'] = [
-                get_val(f'skill_{key}_x') or 0,
-                get_val(f'skill_{key}_y') or 0,
-                get_val(f'skill_{key}_w') or 60,
-                get_val(f'skill_{key}_h') or 60
+                _sv(f'skill_{key}_x'),
+                _sv(f'skill_{key}_y'),
+                _sv(f'skill_{key}_w', 60),
+                _sv(f'skill_{key}_h', 60),
             ]
-            cb = self.configBox.findChild(QCheckBox, f'skill_{key}_enabled')
+            cb = self.findChild(QCheckBox, f'skill_{key}_enabled')
             class_updates[f'{key}_enabled'] = cb.isChecked() if cb else True
 
-        config_helper.batch_save(shared_updates, {current_class: class_updates})
+            class_updates[f'{key}_mode'] = _cv(f'macro_{key}_mode', 'ready')
+            class_updates[f'{key}_priority'] = _sv(f'macro_{key}_priority', 5)
+            class_updates[f'{key}_chain_next'] = _cv(f'macro_{key}_chain_next', 'none')
+            class_updates[f'{key}_chain_delay'] = _dsv(f'macro_{key}_chain_delay', 0.1)
+            class_updates[f'{key}_delay_min'] = _dsv(f'macro_{key}_delay_min', 0.0)
+            class_updates[f'{key}_delay_max'] = _dsv(f'macro_{key}_delay_max', 0.0)
+            class_updates[f'{key}_hp_min'] = _sv(f'macro_{key}_hp_min', 0)
+            class_updates[f'{key}_hp_max'] = _sv(f'macro_{key}_hp_max', 100)
+            class_updates[f'{key}_resource_min'] = _sv(f'macro_{key}_resource_min', 0)
+            class_updates[f'{key}_resource_max'] = _sv(f'macro_{key}_resource_max', 100)
 
-        logging_helper.log_info(f'Saved config values from fields for class: {current_class}')
+        config_helper.batch_save(shared_updates, {current_class: class_updates})
+        logging_helper.log_info(f'Saved config for class: {current_class}')
         bot_config.init()
 
     def _find_and_set(self, object_name, value):
-        le = self.configBox.findChild(QLineEdit, object_name)
+        le = self.findChild(QLineEdit, object_name)
         if le:
             le.setText(value)
+
+    def _find_spin_set(self, object_name, value):
+        sp = self.findChild(QSpinBox, object_name)
+        if sp:
+            sp.setValue(int(value))
+
+    def _find_spin_set_d(self, object_name, value):
+        sp = self.findChild(QDoubleSpinBox, object_name)
+        if sp:
+            sp.setValue(float(value))
+
+    def _find_child(self, widget_type, object_name):
+        return self.findChild(widget_type, object_name)

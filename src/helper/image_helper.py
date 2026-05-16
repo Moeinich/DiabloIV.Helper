@@ -2,6 +2,7 @@ import os
 import time
 import ctypes
 from typing import Tuple, Optional, Any
+from pathlib import Path
 import pyautogui
 import numpy as np
 import cv2
@@ -128,28 +129,33 @@ def save_image(region: Tuple[int, int, int, int], name: str, path: str) -> None:
         logging_helper.log_debug(f"save_image failed for {name} @ {path}: {ex}")
 
 
-def get_image_at_cursor(ix: int = 10, iy: int = 10, name: str = 'default', path: str = './assets/skills/') -> Tuple[int, int]:
+_DEFAULT_SKILL_PATH = str(Path(__file__).resolve().parents[1] / "assets" / "skills") + os.sep
+
+
+def get_image_at_cursor(ix: int = 10, iy: int = 10, name: str = 'default', path: str = None) -> Tuple[int, int]:
     """
     Capture an image centered around the cursor position.
     Returns cursor coordinates.
     """
+    path = path or _DEFAULT_SKILL_PATH
     x, y = mouse_helper.position()
     save_image((x, y, ix, iy), name, path)
     return x, y
 
 
-def get_image_from_coordinates(x: int, y: int, name: str = 'default', path: str = './assets/skills/') -> Tuple[int, int]:
+def get_image_from_coordinates(x: int, y: int, name: str = 'default', path: str = None) -> Tuple[int, int]:
     """
     Backward-compatible wrapper for the toolbox API.
     """
     return get_image_at_coords(x, y, name=name, path=path)
 
 
-def get_image_at_coords(x: int, y: int, ix: int = 10, iy: int = 10, name: str = 'default', path: str = './assets/skills/') -> Tuple[int, int]:
+def get_image_at_coords(x: int, y: int, ix: int = 10, iy: int = 10, name: str = 'default', path: str = None) -> Tuple[int, int]:
     """
     Capture an image at specified coordinates (centered on x,y).
     Returns the provided coordinates.
     """
+    path = path or _DEFAULT_SKILL_PATH
     save_image((x, y, ix, iy), name, path)
     return x, y
 
@@ -343,3 +349,80 @@ def locate_needle(
         return False
 
     raise ValueError(f"Invalid loctype '{loctype}'. Must be 'l' or 'c'.")
+
+
+def read_orb_fill_percentage(center_x: int, center_y: int, radius: int,
+                             empty_r: int, empty_g: int, empty_b: int,
+                             tolerance: int = 45) -> float:
+    if radius <= 0:
+        logging_helper.log_debug("read_orb_fill_percentage: invalid radius")
+        return 0.5
+    try:
+        left = center_x - radius
+        top = center_y - radius
+        diam = radius * 2
+        img = ImageGrab.grab(bbox=(left, top, left + diam, top + diam))
+        arr = np.array(img)
+        total_rows = 0
+        empty_rows = 0
+        r2 = radius * radius
+        for row_y in range(diam):
+            dy = row_y - radius
+            hw_sq = r2 - (dy * dy)
+            if hw_sq < 0:
+                continue
+            hw = int(hw_sq ** 0.5)
+            if hw <= 0:
+                continue
+            total_rows += 1
+            cx = radius
+            row = arr[row_y, max(0, cx - hw):min(diam, cx + hw + 1)]
+            diffs_r = np.abs(row[:, 0].astype(int) - empty_r)
+            diffs_g = np.abs(row[:, 1].astype(int) - empty_g)
+            diffs_b = np.abs(row[:, 2].astype(int) - empty_b)
+            empty_mask = (diffs_r <= tolerance) & (diffs_g <= tolerance) & (diffs_b <= tolerance)
+            empty_ratio = np.sum(empty_mask) / len(row)
+            if empty_ratio > 0.5:
+                empty_rows += 1
+        if total_rows == 0:
+            return 0.5
+        return 1.0 - (empty_rows / total_rows)
+    except Exception as ex:
+        logging_helper.log_debug(f"read_orb_fill_percentage error: {ex}")
+        return 0.5
+
+
+def sample_orb_empty_color(center_x: int, center_y: int, radius: int) -> Tuple[int, int, int]:
+    if radius <= 0:
+        return (0, 0, 0)
+    try:
+        left = center_x - radius
+        top = center_y - radius
+        diam = radius * 2
+        img = ImageGrab.grab(bbox=(left, top, left + diam, top + diam))
+        arr = np.array(img)
+        r2 = radius * radius
+        sample_rows = []
+        bottom_start = int(diam * 0.8)
+        for row_y in range(bottom_start, diam):
+            dy = row_y - radius
+            hw_sq = r2 - (dy * dy)
+            if hw_sq < 0:
+                continue
+            hw = int(hw_sq ** 0.5)
+            if hw <= 0:
+                continue
+            cx = radius
+            row = arr[row_y, max(0, cx - hw):min(diam, cx + hw + 1)]
+            if len(row) > 0:
+                sample_rows.append(row)
+        if not sample_rows:
+            return (0, 0, 0)
+        all_pixels = np.concatenate(sample_rows, axis=0)
+        avg_r = int(np.mean(all_pixels[:, 0]))
+        avg_g = int(np.mean(all_pixels[:, 1]))
+        avg_b = int(np.mean(all_pixels[:, 2]))
+        return (avg_r, avg_g, avg_b)
+    except Exception as ex:
+        logging_helper.log_debug(f"sample_orb_empty_color error: {ex}")
+        return (0, 0, 0)
