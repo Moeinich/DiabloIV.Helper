@@ -144,7 +144,7 @@ classes:
     evade_chain_next: none
     evade_delay_max: 0.0
     evade_delay_min: 0.0
-    evade_enabled: true
+    evade_enabled: false
     evade_hp_max: 60
     evade_hp_min: 0
     evade_mode: hp_guard
@@ -161,7 +161,7 @@ classes:
     pot_chain_next: none
     pot_delay_max: 0.0
     pot_delay_min: 0.0
-    pot_enabled: true
+    pot_enabled: false
     pot_hp_max: 80
     pot_hp_min: 0
     pot_mode: hp_guard
@@ -195,7 +195,7 @@ classes:
     skill2_chain_next: none
     skill2_delay_max: 0.0
     skill2_delay_min: 0.0
-    skill2_enabled: true
+    skill2_enabled: false
     skill2_hp_max: 100
     skill2_hp_min: 0
     skill2_mode: ready
@@ -227,7 +227,7 @@ classes:
     skill4: '4'
     skill4_chain_delay: 0.05
     skill4_chain_next: none
-    skill4_delay_max: 3.0
+    skill4_delay_max: 1.5
     skill4_delay_min: 0.5
     skill4_enabled: true
     skill4_hp_max: 100
@@ -1060,6 +1060,10 @@ classes:
 hp_orb_center:
 - 1253
 - 1321
+hp_orb_dark_color:
+- 0
+- 0
+- 0
 hp_orb_full_color:
 - 119
 - 21
@@ -1080,6 +1084,10 @@ region_detect:
 resource_orb_center:
 - 2186
 - 1322
+resource_orb_dark_color:
+- 0
+- 0
+- 0
 resource_orb_full_color:
 - 62
 - 67

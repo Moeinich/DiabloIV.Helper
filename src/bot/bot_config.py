@@ -14,7 +14,8 @@ VALID_CLASSES = {'Druid', 'Spiritborn', 'Barbarian', 'Necromancer', 'Sorceress',
 
 _PER_SLOT_ATTRS = ['key', 'enabled', 'pos', 'mode', 'priority',
                    'delay_min', 'delay_max', 'hp_min', 'hp_max',
-                   'resource_min', 'resource_max', 'chain_next', 'chain_delay']
+                   'resource_min', 'resource_max', 'chain_next', 'chain_delay',
+                   'always_available']
 
 _ORB_ATTRS = ['hp_orb_center', 'hp_orb_radius', 'hp_orb_full_color', 'hp_orb_dark_color', 'hp_orb_tolerance',
               'resource_orb_center', 'resource_orb_radius', 'resource_orb_full_color', 'resource_orb_dark_color', 'resource_orb_tolerance']
@@ -86,6 +87,9 @@ class BotConfig:
 
     def skill_chain_delay(self, key: str) -> float:
         return getattr(self, f'{key}_chain_delay', 0.1) or 0.1
+
+    def skill_always_available(self, key: str) -> bool:
+        return bool(getattr(self, f'{key}_always_available', False))
 
 
 def init():

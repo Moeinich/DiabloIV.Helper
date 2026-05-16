@@ -71,6 +71,8 @@ for _s in SKILL_SLOTS:
     _skill_timers[_s] = timer_helper.TimerHelper(_s)
 
 _chain_pending: Optional[str] = None
+_held_skill: Optional[str] = None
+_held_hotkey: Optional[str] = None
 
 
 def get_skill_states():
@@ -84,6 +86,7 @@ def _record_skill_state(key: str, found: bool, enabled: bool, mode: str = ''):
         _skill_states[key] = {'state': 'ready', 'mode': mode}
     else:
         _skill_states[key] = {'state': 'cd', 'mode': mode}
+    logging_helper.log_debug(f"[STATE] {key}: state={_skill_states[key]['state']}, found={found}, enabled={enabled}, mode={mode}")
 
 
 def _reaction_delay() -> float:
@@ -160,6 +163,21 @@ def _skill_conf(key: str) -> float:
     return 0.6
 
 
+def release_held_key():
+    global _held_skill, _held_hotkey
+    if _held_hotkey:
+        try:
+            if _held_skill in ('skill5', 'skill6'):
+                from pydirectinput import mouseUp
+                mouseUp(_held_hotkey)
+            else:
+                keyUp(_held_hotkey)
+        except Exception:
+            pass
+    _held_skill = None
+    _held_hotkey = None
+
+
 def _evaluate_skill(c: bot_config.BotConfig, key: str, hp_pct: float, resource_pct: float) -> bool:
     mode = c.skill_mode(key)
     can_cast = True
@@ -181,25 +199,60 @@ def _evaluate_skill(c: bot_config.BotConfig, key: str, hp_pct: float, resource_p
         if not hp_ok or not res_ok:
             can_cast = False
 
-    icon_idx = _icon_index(key)
-    if icon_idx:
-        found = image_helper.locate_needle(c.skill_icon(icon_idx), conf=_skill_conf(key), region=c.skill_region(key))
-    elif key == 'pot':
-        found = image_helper.locate_needle(str(SKILLPATH / 'pot.png'), conf=0.7, region=c.skill_region('pot'))
-    elif key == 'evade':
-        found = image_helper.locate_needle(str(SKILLPATH / 'evade.png'), conf=0.7, region=c.skill_region('evade'))
+    always_avail = c.skill_always_available(key)
+    if always_avail:
+        found = True
+        logging_helper.log_debug(f"[EVAL] {key}: always_available=True, skipping icon detection")
     else:
-        _record_skill_state(key, False, True, mode)
-        return False
+        icon_idx = _icon_index(key)
+        if icon_idx:
+            icon_path = c.skill_icon(icon_idx)
+            region = c.skill_region(key)
+            logging_helper.log_debug(f"[EVAL] {key}: icon={icon_path}, region={region}, conf={_skill_conf(key)}")
+            found = image_helper.locate_needle(icon_path, conf=_skill_conf(key), region=region)
+            logging_helper.log_debug(f"[EVAL] {key}: locate_needle result={found}")
+        elif key == 'pot':
+            found = image_helper.locate_needle(str(SKILLPATH / 'pot.png'), conf=0.7, region=c.skill_region('pot'))
+        elif key == 'evade':
+            found = image_helper.locate_needle(str(SKILLPATH / 'evade.png'), conf=0.7, region=c.skill_region('evade'))
+        else:
+            _record_skill_state(key, False, True, mode)
+            return False
 
     _record_skill_state(key, bool(found), True, mode)
+    logging_helper.log_debug(f"[EVAL] {key}: can_cast={can_cast}, found={bool(found)}, mode={mode}, result={can_cast and bool(found)}")
     return can_cast and bool(found)
 
 
 def _cast_skill(c: bot_config.BotConfig, key: str, delay_mult: float) -> bool:
+    global _held_skill, _held_hotkey
     hotkey = c.skill_key(key)
     if not hotkey:
         return False
+
+    mode = c.skill_mode(key)
+    is_hold = (mode == 'hold')
+
+    if _held_skill and _held_skill != key:
+        release_held_key()
+
+    if is_hold:
+        if _held_skill == key:
+            return False
+        if key == 'skill5':
+            from pydirectinput import mouseDown
+            mouseDown(hotkey)
+        elif key == 'skill6':
+            from pydirectinput import mouseDown
+            mouseDown(hotkey)
+        else:
+            sleep(_reaction_delay())
+            keyDown(hotkey)
+        _held_skill = key
+        _held_hotkey = hotkey
+        _cast_tracker.record_cast(key)
+        logging_helper.log_info(f'Holding {key}')
+        return True
 
     if key == 'skill5':
         leftClick()
@@ -253,6 +306,33 @@ def rotation() -> None:
 
 def combat_rotation(c: bot_config.BotConfig) -> None:
     global _chain_pending
+
+    if _held_skill:
+        hp_ratio, resource_ratio = _read_bars(c)
+        hp_pct = hp_ratio * 100
+        resource_pct = resource_ratio * 100
+        still_valid = True
+        if not c.is_skill_enabled(_held_skill):
+            still_valid = False
+        else:
+            hp_ok = (c.skill_hp_min(_held_skill) <= hp_pct <= c.skill_hp_max(_held_skill))
+            res_ok = (c.skill_resource_min(_held_skill) <= resource_pct <= c.skill_resource_max(_held_skill))
+            if not hp_ok or not res_ok:
+                still_valid = False
+            if still_valid and not c.skill_always_available(_held_skill):
+                icon_idx = _icon_index(_held_skill)
+                if icon_idx:
+                    found = image_helper.locate_needle(
+                        c.skill_icon(icon_idx), conf=_skill_conf(_held_skill),
+                        region=c.skill_region(_held_skill))
+                    if not found:
+                        still_valid = False
+        if still_valid:
+            return
+        else:
+            logging_helper.log_info(f'Releasing held {_held_skill}')
+            release_held_key()
+            sleep(uniform(0.04, 0.12))
 
     hp_ratio, resource_ratio = _read_bars(c)
     mult = _hp_delay_multiplier(hp_ratio)

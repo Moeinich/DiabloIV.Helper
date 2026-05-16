@@ -20,6 +20,7 @@ MACRO_KEYS_PER_SKILL = [
     '{key}_hp_min', '{key}_hp_max',
     '{key}_resource_min', '{key}_resource_max',
     '{key}_chain_next', '{key}_chain_delay',
+    '{key}_always_available',
 ]
 
 CLASS_KEYS = []
@@ -163,6 +164,7 @@ def _migrate_to_nested(data: Dict[str, Any]) -> Dict[str, Any]:
         'hp_min': 0, 'hp_max': 100,
         'resource_min': 0, 'resource_max': 100,
         'chain_next': '', 'chain_delay': 0.1,
+        'always_available': False,
     }
 
     result = {
@@ -209,6 +211,7 @@ _SHARED_MACRO_DEFAULTS = {
     'hp_min': 0, 'hp_max': 100,
     'resource_min': 0, 'resource_max': 100,
     'chain_next': '', 'chain_delay': 0.1,
+    'always_available': False,
 }
 
 def _migrate_color_keys(data: Dict[str, Any]) -> Dict[str, Any]:

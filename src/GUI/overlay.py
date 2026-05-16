@@ -243,6 +243,7 @@ class Overlay(QMainWindow):
         self.running = False
         if hasattr(self, 'rotation_thread') and self.rotation_thread.is_alive():
             self.rotation_thread.join(timeout=2)
+        rotation.release_held_key()
 
     def _rotation_loop(self):
         self.proc.set_foreground_window()

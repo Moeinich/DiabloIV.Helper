@@ -402,7 +402,7 @@ class Toolbox(QDialog):
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("Mode:"))
         mode_cb = QComboBox()
-        mode_cb.addItems(['ready', 'delay', 'filler', 'hp_guard', 'resource_guard'])
+        mode_cb.addItems(['ready', 'delay', 'filler', 'hp_guard', 'resource_guard', 'hold'])
         mode_cb.setObjectName(f'macro_{key}_mode')
         mode_cb.currentTextChanged.connect(lambda text, k=key: self._update_macro_title(k))
         row1.addWidget(mode_cb)
@@ -490,6 +490,13 @@ class Toolbox(QDialog):
         row4.addWidget(res_max)
         row4.addStretch()
         vbox.addLayout(row4)
+
+        row5 = QHBoxLayout()
+        always_cb = QCheckBox("Always Available (ignore cooldown)")
+        always_cb.setObjectName(f'macro_{key}_always_available')
+        row5.addWidget(always_cb)
+        row5.addStretch()
+        vbox.addLayout(row5)
 
         return group
 
@@ -856,6 +863,10 @@ class Toolbox(QDialog):
             self._find_spin_set(f'macro_{key}_resource_min', cls_cfg.get(f'{key}_resource_min', 0))
             self._find_spin_set(f'macro_{key}_resource_max', cls_cfg.get(f'{key}_resource_max', 100))
 
+            always_cb = self.findChild(QCheckBox, f'macro_{key}_always_available')
+            if always_cb:
+                always_cb.setChecked(cls_cfg.get(f'{key}_always_available', False))
+
             self._update_macro_title(key)
 
         hp_center = config_helper.get_shared_config('hp_orb_center')
@@ -980,6 +991,8 @@ class Toolbox(QDialog):
             class_updates[f'{key}_hp_max'] = _sv(f'macro_{key}_hp_max', 100)
             class_updates[f'{key}_resource_min'] = _sv(f'macro_{key}_resource_min', 0)
             class_updates[f'{key}_resource_max'] = _sv(f'macro_{key}_resource_max', 100)
+            always_cb = self.findChild(QCheckBox, f'macro_{key}_always_available')
+            class_updates[f'{key}_always_available'] = always_cb.isChecked() if always_cb else False
 
         config_helper.batch_save(shared_updates, {current_class: class_updates})
         logging_helper.log_info(f'Saved config for class: {current_class}')

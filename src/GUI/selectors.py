@@ -458,7 +458,7 @@ class ColorPickerOverlay(QWidget):
         self.activateWindow()
         self.grabMouse()
         self.grabKeyboard()
-        from PyQt5.QtWidgets import QEventLoop
+        from PyQt5.QtCore import QEventLoop
         loop = QEventLoop()
         while not self._done:
             loop.processEvents()
