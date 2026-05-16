@@ -119,10 +119,12 @@ def move_to_ref_location(stuck=False):
 
     evade_var = cfg.get('evade', 'space')  # Standardwert 'space'
 
+    climb_region = cfg.get('region_climb', (750, 250, 1250, 750))
+
     # Überprüfen, ob eine kletterbare Oberfläche erkannt wird
     try:
         climb_path = os.path.join('.', 'assets', 'skills', 'climb.png')
-        if image_helper.locate_needle(climb_path, conf=0.7, region=(750, 250, 1250, 750)):
+        if image_helper.locate_needle(climb_path, conf=0.7, region=climb_region):
             press(evade_var)
             logging_helper.log_debug("Climb detected, pressed evade key '%s'" % evade_var)
     except Exception as ex:

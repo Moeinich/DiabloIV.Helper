@@ -3,10 +3,25 @@ from typing import Tuple, Optional, Any
 import pyautogui
 import numpy as np
 import cv2
-from PIL import ImageGrab
+from PIL import ImageGrab, Image
 from math import sqrt
 
 from helper import mouse_helper, logging_helper
+
+_needle_cache = {}
+
+
+def _get_needle_image(path: str):
+    if path not in _needle_cache:
+        try:
+            _needle_cache[path] = Image.open(path)
+        except Exception:
+            return None
+    return _needle_cache[path]
+
+
+def clear_needle_cache():
+    _needle_cache.clear()
 
 
 def get_pixel_color_at_cursor() -> Tuple[int, int, int, int, int]:
@@ -95,22 +110,31 @@ def pixel_matches_color(x: int, y: int, exR: int, exG: int, exB: int, tolerance:
         return False
 
     
+def _get_detect_region() -> Tuple[int, int, int, int]:
+    try:
+        from helper import config_helper
+        cfg = config_helper.read_config() or {}
+        val = cfg.get('region_detect')
+        if val and isinstance(val, list) and len(val) == 4:
+            x, y, w, h = val
+            return (x, y, x + w, y + h)
+    except Exception:
+        pass
+    return (600, 100, 2000, 1000)
+
 def detect_lines(line_type: str = 'path') -> Optional[Tuple[int, int, int, int]]:
     """
     Detect narrow, curved lines of a given type ('path' or 'mob') by specified RGB color on the screen.
     Returns absolute bounding box (x, y, w, h) of the closest matching contour or None.
     """
-    # RGB color ranges for different line types
     line_config = {
         'path': {
             'lower': np.array([254, 254, 254], dtype=np.uint8),
             'upper': np.array([255, 255, 255], dtype=np.uint8),
-            'screen_box': (600, 100, 1400, 900)  # left, top, width, height
         },
         'mob': {
             'lower': np.array([155, 37, 1], dtype=np.uint8),
             'upper': np.array([168, 38, 1], dtype=np.uint8),
-            'screen_box': (600, 100, 1400, 900)  # left, top, width, height
         }
     }
 
@@ -118,8 +142,9 @@ def detect_lines(line_type: str = 'path') -> Optional[Tuple[int, int, int, int]]
         logging_helper.log_debug(f"detect_lines: unknown line_type '{line_type}'")
         return None
 
+    screen_box = _get_detect_region()
+    left, top, width, height = screen_box
     cfg = line_config[line_type]
-    left, top, width, height = cfg['screen_box']
 
     try:
         # Grab region and convert to RGB for processing
@@ -186,16 +211,8 @@ def locate_needle(
     conf: float = 0.7,
     loctype: str = 'l',
     grayscale: bool = True,
-    region: Tuple[int, int, int, int] = (525, 875, 1380, 1050)
+    region: Optional[Tuple[int, int, int, int]] = None
 ) -> Any:
-    """
-    Searches the haystack image or the screen for the needle image.
-
-    Returns:
-        - If haystack is given: pyautogui.locate(...) result or (-1, -1) if not found.
-        - If loctype == 'l': bool (found / not found).
-        - If loctype == 'c': (x, y) center coordinates or (-1, -1) if not found.
-    """
     def log_result(found: bool, context: str, result: Any = None) -> None:
         if found:
             logging_helper.log_debug(f"Found {context}: {needle} -> {result}")
@@ -204,7 +221,10 @@ def locate_needle(
 
     try:
         if haystack:
-            res = pyautogui.locate(needle, haystack, confidence=conf)
+            needle_img = _get_needle_image(needle)
+            if needle_img is None:
+                return (-1, -1)
+            res = pyautogui.locate(needle_img, haystack, confidence=conf)
             if res:
                 log_result(True, "needle in haystack", res)
                 return res
@@ -212,7 +232,10 @@ def locate_needle(
             return (-1, -1)
 
         if loctype == 'l':
-            res = pyautogui.locateOnScreen(needle, confidence=conf, region=region, grayscale=grayscale)
+            needle_img = _get_needle_image(needle)
+            if needle_img is None:
+                return False
+            res = pyautogui.locateOnScreen(needle_img, confidence=conf, region=region, grayscale=grayscale)
             if res:
                 log_result(True, "'l' image", res)
                 return True
@@ -220,7 +243,10 @@ def locate_needle(
             return False
 
         if loctype == 'c':
-            res = pyautogui.locateCenterOnScreen(needle, confidence=conf, region=region, grayscale=grayscale)
+            needle_img = _get_needle_image(needle)
+            if needle_img is None:
+                return (-1, -1)
+            res = pyautogui.locateCenterOnScreen(needle_img, confidence=conf, region=region, grayscale=grayscale)
             if res:
                 coords = (int(res.x), int(res.y)) if hasattr(res, 'x') else (int(res[0]), int(res[1]))
                 log_result(True, "'c' image", coords)
@@ -229,7 +255,9 @@ def locate_needle(
             return (-1, -1)
 
     except Exception as ex:
-        logging_helper.log_debug(f"locate_needle error for {needle}: {ex}")
+        msg = str(ex).strip()
+        if msg:
+            logging_helper.log_debug(f"locate_needle error for {needle}: {ex}")
         if loctype == 'c' or haystack:
             return (-1, -1)
         return False

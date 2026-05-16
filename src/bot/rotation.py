@@ -1,187 +1,222 @@
-from random import uniform
+from random import uniform, random
 from time import sleep
-from typing import Optional
+from typing import Dict
 from pathlib import Path
-from pydirectinput import keyDown, keyUp, press, leftClick, rightClick
+from pydirectinput import keyDown, keyUp, leftClick, rightClick
+from threading import Lock
 
-from helper import mouse_helper, image_helper, timer_helper, config_helper, logging_helper
+from helper import image_helper, timer_helper, logging_helper
 from helper.timer_helper import TIMER_STOPPED
+from bot import bot_config
 
-# Skill-Assets relativ zum Projekt
 SKILLPATH = Path(__file__).resolve().parents[2] / "assets" / "skills"
 
-# Timer-Instanzen für Abklingzeiten
 timer1 = timer_helper.TimerHelper('timer1')
 timer2 = timer_helper.TimerHelper('timer2')
-timer3 = timer_helper.TimerHelper('timer3')
 
-# Konfigurierbare Werte
-MOVE_OFFSET_N = 25
 POTION_TIMER_SEC = 3
 EVADE_TIMER_SEC = 3
-CLICK_DELAY_MIN = 0.11
-CLICK_DELAY_MAX = 0.14
+
+HUMAN_REACTION_MIN = 0.03
+HUMAN_REACTION_MAX = 0.10
+HUMAN_KEY_HOLD_MIN = 0.03
+HUMAN_KEY_HOLD_MAX = 0.12
+HUMAN_POST_CAST_MIN = 0.04
+HUMAN_POST_CAST_MAX = 0.15
+HUMAN_HP_HESITATION_MIN = 0.05
+HUMAN_HP_HESITATION_MAX = 0.18
+HUMAN_PRE_KEY_MIN = 0.01
+HUMAN_PRE_KEY_MAX = 0.04
+HUMAN_RELEASE_GAP_MIN = 0.01
+HUMAN_RELEASE_GAP_MAX = 0.03
+HUMAN_SKILL_LOOP_MIN = 0.08
+HUMAN_SKILL_LOOP_MAX = 0.25
+HUMAN_ULT_LOOP_MIN = 0.10
+HUMAN_ULT_LOOP_MAX = 0.30
+DISTRACTED_PROBABILITY = 0.03
+DISTRACTED_DELAY_MIN = 0.2
+DISTRACTED_DELAY_MAX = 0.5
+PRIORITY_NOISE_CHANCE = 0.2
 
 
-def press_combo(key: str) -> None:
-    """
-    Drückt eine Tastenkombination 'Shift' + key. Stellt sicher, dass Shift wieder losgelassen wird.
-    """
+class SkillCastTracker:
+    _instance = None
+    _lock = Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._casts = {}
+                    cls._instance._flash_duration = 0.4
+        return cls._instance
+
+    def record_cast(self, skill_key: str) -> None:
+        import time
+        with self._lock:
+            self._casts[skill_key] = time.time()
+
+    def is_flashing(self, skill_key: str) -> bool:
+        import time
+        with self._lock:
+            if skill_key not in self._casts:
+                return False
+            elapsed = time.time() - self._casts[skill_key]
+            return elapsed < self._flash_duration
+
+    def get_all_flashing(self) -> Dict[str, float]:
+        import time
+        with self._lock:
+            result = {}
+            for key, ts in self._casts.items():
+                elapsed = time.time() - ts
+                if elapsed < self._flash_duration:
+                    result[key] = elapsed
+            return result
+
+
+_cast_tracker = SkillCastTracker()
+
+
+def _reaction_delay() -> float:
+    return uniform(HUMAN_REACTION_MIN, HUMAN_REACTION_MAX)
+
+
+def _post_cast_delay() -> float:
+    return uniform(HUMAN_POST_CAST_MIN, HUMAN_POST_CAST_MAX)
+
+
+def _hp_hesitation_delay() -> float:
+    return uniform(HUMAN_HP_HESITATION_MIN, HUMAN_HP_HESITATION_MAX)
+
+
+def _distracted_pause() -> None:
+    if random() < DISTRACTED_PROBABILITY:
+        sleep(uniform(DISTRACTED_DELAY_MIN, DISTRACTED_DELAY_MAX))
+
+
+def human_press(key: str) -> None:
+    sleep(_reaction_delay())
+    sleep(uniform(HUMAN_PRE_KEY_MIN, HUMAN_PRE_KEY_MAX))
+    keyDown(key)
+    sleep(uniform(HUMAN_KEY_HOLD_MIN, HUMAN_KEY_HOLD_MAX))
+    sleep(uniform(HUMAN_RELEASE_GAP_MIN, HUMAN_RELEASE_GAP_MAX))
+    keyUp(key)
+
+
+def _compute_hp_ratio(c: bot_config.BotConfig) -> float:
     try:
-        keyDown('shift')
-        press(key)
-    finally:
-        try:
-            keyUp('shift')
-        except Exception:
-            # KeyUp kann fehlschlagen, aber wir wollen nicht abstürzen
-            pass
+        raw = c.hp_pixel
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            raw = [608, 980, [[95, 10, 15], [148, 14, 24], [97, 29, 82]]]
+        hp_x, hp_y = raw[0], raw[1]
+        hp_colors = raw[2] if len(raw) > 2 and isinstance(raw[2], list) else [[95, 10, 15], [148, 14, 24], [97, 29, 82]]
+        if hp_colors and isinstance(hp_colors[0], (int, float)):
+            hp_colors = [hp_colors]
+        for color in hp_colors:
+            if len(color) >= 3 and image_helper.pixel_matches_color(hp_x, hp_y, color[0], color[1], color[2], 45):
+                return 1.0
+        return 0.0
+    except Exception:
+        return 0.5
 
 
-def rotation(x: Optional[int] = None, y: Optional[int] = None) -> None:
-    """
-    Setzt die Kampfrotation für eine spezifische Klasse basierend auf der Konfiguration.
-    """
-    try:
-        cfg = config_helper.read_config() or {}
-    except Exception as ex:
-        logging_helper.log_error("Failed to read config for rotation: %s" % ex)
+def _hp_delay_multiplier(hp_ratio: float) -> float:
+    return 0.35 + (hp_ratio * 0.65)
+
+
+def rotation() -> None:
+    c = bot_config.get()
+    if c is None:
+        bot_config.init()
+        c = bot_config.get()
+    if c is None:
+        logging_helper.log_error("No bot config available for rotation")
         return
 
-    class_name = str(cfg.get('class', '')).strip().capitalize()
-    valid = {'Druid', 'Spiritborn', 'Barbarian', 'Necromancer', 'Sorceress', 'Rogue', 'Warlock'}
-
-    if class_name in valid:
-        combat_rotation(class_name.lower(), x, y)
-    else:
-        logging_helper.log_error("No viable class specified in configuration: %r" % class_name)
+    combat_rotation(c)
 
 
-def combat_rotation(class_name: str, x: Optional[int], y: Optional[int]) -> None:
-    """
-    Führt die Kampfrotation aus: Health/Evade prüfen und Skills verwenden.
-    """
+def combat_rotation(c: bot_config.BotConfig) -> None:
+    hp_ratio = _compute_hp_ratio(c)
+    mult = _hp_delay_multiplier(hp_ratio)
+
+    if handle_health_and_evade(c, mult):
+        sleep(_hp_hesitation_delay())
+
+    use_skills(c, mult)
+
+    sleep(uniform(0.04, 0.18) * mult)
+    _distracted_pause()
+
+
+def handle_health_and_evade(c: bot_config.BotConfig, delay_mult: float = 1.0) -> bool:
     try:
-        cfg = config_helper.read_config() or {}
-    except Exception as ex:
-        logging_helper.log_error("Failed to read config in combat_rotation: %s" % ex)
-        return
+        hp_ratio = _compute_hp_ratio(c)
+        if hp_ratio >= 1.0:
+            return False
 
-    evade = cfg.get('evade', '')
-    pot = cfg.get('pot', '')
-    skill1 = cfg.get('skill1', '')
-    skill2 = cfg.get('skill2', '')
-    skill3 = cfg.get('skill3', '')
-    skill4 = cfg.get('skill4', '')
-
-    n = MOVE_OFFSET_N
-    target_type = check_target_type(x, y, n)
-
-    if target_type:
-        handle_health_and_evade(evade, pot)
-        use_skills(class_name, target_type, x, y, skill1, skill2, skill3, skill4)
-
-
-def check_target_type(x: Optional[int], y: Optional[int], n: int) -> Optional[str]:
-    """
-    Ermittelt ob Ziel 'normal' oder 'elite' ist.
-    Beachtet: reduziert doppelte Aufrufe von detect_lines.
-    """
-    try:
-        detect_mob = image_helper.detect_lines('mob') is not None
-    except Exception as ex:
-        logging_helper.log_debug("detect_lines error in check_target_type: %s" % ex)
-        detect_mob = False
-
-    try:
-        # Normal checks
-        if (image_helper.pixel_matches_color(801, 45, 107, 2, 1, 20) or
-            image_helper.pixel_matches_color(801, 45, 156, 65, 93, 20) or
-            image_helper.pixel_matches_color(801, 45, 231, 13, 9, 20) or
-            detect_mob):
-            if x is not None and y is not None:
-                mouse_helper.move_smooth(x + 400 + n, y + 50 + (n * 2), 1)
-            return 'normal'
-
-        # Elite checks
-        if (image_helper.pixel_matches_color(710, 45, 162, 4, 4, 20) or
-            image_helper.pixel_matches_color(710, 45, 124, 71, 98, 20) or
-            detect_mob):
-            if x is not None and y is not None:
-                mouse_helper.move_smooth(x + 400 + (n * 3), y + 50 + (n * 6), 1)
-            return 'elite'
-    except Exception as ex:
-        logging_helper.log_debug("Error in check_target_type pixel checks: %s" % ex)
-
-    return None
-
-
-def handle_health_and_evade(evade: str, pot: str) -> None:
-    """
-    Prüft Lebensanzeige und verwendet bei Bedarf Potion / Evade.
-    Hinweis: die Farbe-Checks sind projekt-spezifisch; bei Änderungen der UI anpassen.
-    """
-    try:
-        low_hp = not image_helper.pixel_matches_color(608, 980, 95, 10, 15, 45) and \
-                 not image_helper.pixel_matches_color(608, 972, 148, 14, 24, 45) and \
-                 not image_helper.pixel_matches_color(607, 978, 97, 29, 82, 45)
-
-        if low_hp:
-            if locate_and_use_potion(pot):
+        if c.is_skill_enabled('pot'):
+            if locate_and_use_potion(c, delay_mult):
                 logging_helper.log_info('Used potion')
-            if locate_and_use_evade(evade):
+
+        if c.is_skill_enabled('evade'):
+            if locate_and_use_evade(c, delay_mult):
                 logging_helper.log_info('Used evade')
+
+        return True
     except Exception as ex:
         logging_helper.log_debug("handle_health_and_evade error: %s" % ex)
 
+    return False
 
-def locate_and_use_potion(pot: str) -> bool:
-    """
-    Sucht nach Trank-Icons und benutzt den angegebenen Taste für Potion.
-    """
-    potion_images = ['pot.png']
+
+def locate_and_use_potion(c: bot_config.BotConfig, delay_mult: float = 1.0) -> bool:
     try:
-        for img in potion_images:
-            path = str(SKILLPATH / img)
-            try:
-                found = image_helper.locate_needle(path, conf=0.7)
-            except Exception as ex:
-                logging_helper.log_debug("locate_needle error for %s: %s" % (path, ex))
-                found = False
+        path = str(SKILLPATH / 'pot.png')
+        region = c.skill_region('pot')
+        try:
+            found = image_helper.locate_needle(path, conf=0.7, region=region)
+        except Exception as ex:
+            logging_helper.log_debug("locate_needle error for %s: %s" % (path, ex))
+            found = False
 
-            if found and timer1.get_timer_state() == TIMER_STOPPED:
-                timer1.start_timer(POTION_TIMER_SEC)
-                try:
-                    press(pot)
-                except Exception as ex:
-                    logging_helper.log_debug("press(pot) failed: %s" % ex)
-                sleep(uniform(CLICK_DELAY_MIN, CLICK_DELAY_MAX))
-                return True
+        if found and timer1.get_timer_state() == TIMER_STOPPED:
+            timer1.start_timer(POTION_TIMER_SEC)
+            sleep(_hp_hesitation_delay() * delay_mult)
+            try:
+                human_press(c.pot_key)
+                _cast_tracker.record_cast('pot')
+            except Exception as ex:
+                logging_helper.log_debug("human_press(pot) failed: %s" % ex)
+            sleep(uniform(0.08, 0.20) * delay_mult)
+            return True
     except Exception as ex:
         logging_helper.log_debug("locate_and_use_potion error: %s" % ex)
 
     return False
 
 
-def locate_and_use_evade(evade: str) -> bool:
-    """
-    Sucht nach Evade-Icon und führt Evade-Taste aus (mit Timer).
-    """
+def locate_and_use_evade(c: bot_config.BotConfig, delay_mult: float = 1.0) -> bool:
     try:
         path = str(SKILLPATH / 'evade.png')
+        region = c.skill_region('evade')
         try:
-            found = image_helper.locate_needle(path, conf=0.7)
+            found = image_helper.locate_needle(path, conf=0.7, region=region)
         except Exception as ex:
             logging_helper.log_debug("locate_needle error for evade: %s" % ex)
             found = False
 
         if found and timer2.get_timer_state() == TIMER_STOPPED:
             timer2.start_timer(EVADE_TIMER_SEC)
+            sleep(_hp_hesitation_delay() * delay_mult)
             try:
-                press(evade)
+                human_press(c.evade_key)
+                _cast_tracker.record_cast('evade')
             except Exception as ex:
-                logging_helper.log_debug("press(evade) failed: %s" % ex)
-            sleep(uniform(CLICK_DELAY_MIN, CLICK_DELAY_MAX))
+                logging_helper.log_debug("human_press(evade) failed: %s" % ex)
+            sleep(uniform(0.08, 0.20) * delay_mult)
             return True
     except Exception as ex:
         logging_helper.log_debug("locate_and_use_evade error: %s" % ex)
@@ -189,39 +224,54 @@ def locate_and_use_evade(evade: str) -> bool:
     return False
 
 
-def use_skills(class_name: str, target_type: str, x: Optional[int], y: Optional[int],
-               skill1: str, skill2: str, skill3: str, skill4: str) -> None:
-    """
-    Verwendet die Klassenskills basierend auf Skill-Icons und Ziel-Typ.
-    Reihenfolge der Prüfungen bleibt wie bisher, Logging erweitert.
-    """
+def use_skills(c: bot_config.BotConfig, delay_mult: float = 1.0) -> None:
     try:
-        # Standardisierte Pfade für Skill-Icons
-        def skill_icon(idx: str) -> str:
-            return str(SKILLPATH / class_name / (idx + '.png'))
+        skill_order = [
+            ('skill4', c.skill_key('skill4'), '04', c.skill_region('skill4')),
+            ('skill3', c.skill_key('skill3'), '03', c.skill_region('skill3')),
+            ('skill1', c.skill_key('skill1'), '01', c.skill_region('skill1')),
+            ('skill2', c.skill_key('skill2'), '02', c.skill_region('skill2')),
+        ]
 
-        if image_helper.locate_needle(skill_icon('04'), conf=0.6):
-            press(skill4)
-            logging_helper.log_info('Used skill 4')
-        elif image_helper.locate_needle(skill_icon('03'), conf=0.6):
-            press(skill3)
-            logging_helper.log_info('Used skill 3')
-        elif image_helper.locate_needle(skill_icon('01'), conf=0.6):
-            press(skill1)
-            logging_helper.log_info('Used skill 1')
-        elif image_helper.locate_needle(skill_icon('02'), conf=0.6):
-            press(skill2)
-            logging_helper.log_info('Used skill 2')
+        if random() < PRIORITY_NOISE_CHANCE:
+            skill_order = skill_order[::-1]
 
-        sleep(uniform(0.21, 0.24))
+        cast_done = False
+        for skill_key, skill_hotkey, icon_idx, skill_pos in skill_order:
+            if c.is_skill_enabled(skill_key):
+                found = image_helper.locate_needle(c.skill_icon(icon_idx), conf=0.6, region=skill_pos)
+                if found:
+                    sleep(_reaction_delay() * delay_mult)
+                    human_press(skill_hotkey)
+                    _cast_tracker.record_cast(skill_key)
+                    logging_helper.log_info(f'Used {skill_key}')
+                    sleep(_post_cast_delay() * delay_mult)
+                    cast_done = True
+                    break
 
-        if image_helper.locate_needle(skill_icon('05'), conf=0.9):
-            rightClick()
-            logging_helper.log_info('Used right mouse skill')
-        elif x is not None and y is not None:
-            leftClick()
-            logging_helper.log_info('Used left mouse skill')
+        if not cast_done:
+            sleep(uniform(HUMAN_SKILL_LOOP_MIN, HUMAN_SKILL_LOOP_MAX) * delay_mult)
 
-        sleep(uniform(0.21, 0.24))
+        if c.is_skill_enabled('skill5'):
+            found = image_helper.locate_needle(c.skill_icon('05'), conf=0.9, region=c.skill_region('skill5'))
+            if found:
+                sleep(_reaction_delay() * delay_mult)
+                leftClick()
+                _cast_tracker.record_cast('skill5')
+                logging_helper.log_info('Used skill 5 (LMouse)')
+                sleep(_post_cast_delay() * delay_mult)
+                return
+
+        if c.is_skill_enabled('skill6'):
+            found = image_helper.locate_needle(c.skill_icon('06'), conf=0.9, region=c.skill_region('skill6'))
+            if found:
+                sleep(_reaction_delay() * delay_mult)
+                rightClick()
+                _cast_tracker.record_cast('skill6')
+                logging_helper.log_info('Used skill 6 (RMouse)')
+                sleep(_post_cast_delay() * delay_mult)
+                return
+
+        sleep(uniform(HUMAN_ULT_LOOP_MIN, HUMAN_ULT_LOOP_MAX) * delay_mult)
     except Exception as ex:
         logging_helper.log_debug("use_skills error: %s" % ex)

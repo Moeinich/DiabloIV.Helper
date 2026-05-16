@@ -6,7 +6,7 @@ from pathlib import Path
 import os
 import logging
 
-from helper import image_helper, logging_helper
+from helper import image_helper, logging_helper, config_helper
 
 # Assets-Pfad (relativ zum Repo-Root, berechnet aus Dateiposition)
 ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets" / "pickit"
@@ -18,6 +18,18 @@ CLICK_PRE_DELAY = (0.05, 0.18)  # Wartezeit vor Klick (sek.)
 PICK_COOLDOWN = (1.5, 2.5)  # Wartezeit nach erfolgreichem Aufheben
 RANDOM_OFFSET = (-2, 18, -2, 2)  # Standard-Offsets für zufälligen Klick
 
+
+def _get_default_region():
+    """Get pickit region from config, with fallback to DEFAULT_REGION."""
+    try:
+        cfg = config_helper.read_config() or {}
+        val = cfg.get('region_pickit')
+        if val and isinstance(val, list) and len(val) == 4:
+            return tuple(val)
+    except Exception:
+        pass
+    return DEFAULT_REGION
+
 # Farbprüfungen: [offset_x, offset_y, r, g, b, tolerance]
 DEFAULT_ITEM_COLORS: Sequence[Sequence[int]] = [
     [1, 4, 248, 128, 5, 50],
@@ -27,11 +39,13 @@ DEFAULT_ITEM_COLORS: Sequence[Sequence[int]] = [
 ]
 
 
-def get_ref_location(ref_img: str, region: Tuple[int, int, int, int] = DEFAULT_REGION) -> Tuple[int, int]:
+def get_ref_location(ref_img: str, region: Tuple[int, int, int, int] = None) -> Tuple[int, int]:
     """
     Suche ein Referenzbild in `IMAGE_DIR` und gebe (x, y) zurück.
     Bei Fehler oder Nicht-Fund wird (-1, -1) zurückgegeben.
     """
+    if region is None:
+        region = _get_default_region()
     try:
         img_path = os.path.join(IMAGE_DIR, ref_img)
         x, y = image_helper.locate_needle(img_path, loctype='c', region=region)

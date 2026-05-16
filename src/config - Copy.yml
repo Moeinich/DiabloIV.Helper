@@ -1,0 +1,104 @@
+apptitle: notepad
+class: Paladin
+classes:
+  Barbarian:
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos: &id001
+    - 980
+    - 45
+    - 60
+    - 60
+  Druid:
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos: *id001
+  Necromancer:
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos: *id001
+  Paladin:
+    evade: space
+    evade_enabled: true
+    evade_pos:
+    - 2079
+    - 1192
+    - 43
+    - 49
+    pot: '2'
+    pot_enabled: true
+    pot_pos:
+    - 1310
+    - 1191
+    - 44
+    - 49
+    skill1: q
+    skill1_enabled: true
+    skill1_pos:
+    - 1471
+    - 1299
+    - 81
+    - 81
+    skill2: w
+    skill2_enabled: true
+    skill2_pos:
+    - 1558
+    - 1297
+    - 76
+    - 84
+    skill3: e
+    skill3_enabled: true
+    skill3_pos:
+    - 1639
+    - 1298
+    - 82
+    - 84
+    skill4: r
+    skill4_enabled: true
+    skill4_pos:
+    - 1722
+    - 1298
+    - 81
+    - 84
+    skill5: leftclick
+    skill5_enabled: true
+    skill5_pos:
+    - 1809
+    - 1299
+    - 78
+    - 82
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos:
+    - 1890
+    - 1298
+    - 81
+    - 83
+  Rogue:
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos: *id001
+  Sorceress:
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos: *id001
+  Spiritborn:
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos: *id001
+  Warlock:
+    skill6: rightclick
+    skill6_enabled: true
+    skill6_pos: *id001
+hp_pixel:
+- 1241
+- 1287
+- - 119
+  - 21
+  - 27
+region_detect:
+- 1149
+- 1176
+- 1012
+- 258
+rotation_hotkey: e

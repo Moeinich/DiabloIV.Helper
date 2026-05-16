@@ -1,30 +1,342 @@
-from os import listdir, path, makedirs
-from threading import Thread
+from os import path
+from pathlib import Path
 from keyboard import add_hotkey
-from PyQt5.QtGui import QIcon, QPixmap, QStandardItemModel, QStandardItem, QIntValidator
-from PyQt5.QtWidgets import (QApplication, QComboBox, QDialog, QGridLayout, QLineEdit,
-                              QGroupBox, QHBoxLayout, QLabel, QPushButton, QStyleFactory)
+from PyQt5.QtCore import Qt, QPoint, QRect, QTimer
+from PyQt5.QtGui import QCursor
+from PyQt5.QtGui import QIcon, QPixmap, QIntValidator, QPainter, QPen, QBrush, QColor
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QDialog, QGridLayout, QLineEdit,
+                              QGroupBox, QHBoxLayout, QLabel, QPushButton, QStyleFactory, QWidget)
 
-from helper import recorder_helper, image_helper, config_helper, logging_helper
+from helper import image_helper, config_helper, logging_helper
+from bot import bot_config
+from pynput import mouse as pynput_mouse
+
+
+class RegionSelector(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setGeometry(QApplication.desktop().screenGeometry())
+        self.corner1 = None
+        self.corner2 = None
+        self.is_first_click = True
+        self.mouse_pos = QCursor.pos()
+        self.mouse_tracking_timer = QTimer()
+        self.mouse_tracking_timer.timeout.connect(self._update_mouse_pos)
+        self.mouse_tracking_timer.start(16)
+        self.listener = None
+
+    def _update_mouse_pos(self):
+        self.mouse_pos = QCursor.pos()
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        if self.corner1 and self.corner2:
+            rect = QRect(self.corner1, self.corner2).normalized()
+            painter.setPen(QPen(Qt.white, 2))
+            painter.setBrush(QBrush(QColor(0, 255, 0, 80)))
+            painter.drawRect(rect)
+            label = f"{rect.width()}x{rect.height()}"
+            painter.setPen(QPen(Qt.white, 1))
+            painter.drawText(rect.center(), label)
+        elif self.corner1:
+            painter.setPen(QPen(Qt.yellow, 2))
+            painter.setBrush(QBrush(QColor(255, 255, 0, 150)))
+            painter.drawEllipse(self.corner1, 12, 12)
+            painter.drawText(self.corner1 + QPoint(15, 5), "Click 2nd corner")
+        else:
+            painter.setPen(QPen(Qt.red, 2))
+            painter.drawText(self.mouse_pos + QPoint(15, 5), "Click 1st corner")
+            painter.drawEllipse(self.mouse_pos, 6, 6)
+
+    def mousePressEvent(self, event):
+        pass
+
+    def run(self):
+        self.listener = pynput_mouse.Listener(
+            on_click=lambda x, y, button, pressed: self._on_click(x, y, button, pressed) if pressed else None)
+        self.listener.start()
+        self.show()
+        self.setFocus()
+        self.raise_()
+        self.activateWindow()
+        while self.isVisible():
+            QApplication.processEvents()
+        if self.listener.is_alive():
+            self.listener.stop()
+        self.listener.join(timeout=1)
+
+    def _on_click(self, x, y, button, pressed):
+        if pressed:
+            pos = QPoint(x, y)
+            if self.is_first_click:
+                self.corner1 = pos
+                self.is_first_click = False
+                self.update()
+            else:
+                self.corner2 = pos
+                if self.listener.is_alive():
+                    self.listener.stop()
+                self.close()
+
+
+class MouseClickEvent:
+    def __init__(self, pos):
+        self._pos = pos
+
+    def pos(self):
+        return self._pos
+
+
+class PointSelector:
+    def run(self):
+        self._result = None
+        self._click_pos = None
+
+        def on_click(x, y, button, pressed):
+            if pressed:
+                self._click_pos = QPoint(x, y)
+                return False
+
+        listener = pynput_mouse.Listener(on_click=on_click)
+        listener.start()
+        listener.join()
+
+        if self._click_pos:
+            self._result = self._click_pos
+        return self._result
+
+
+class LiveVisualizerWidget(QWidget):
+    STATE_COLORS = {
+        'ready': QColor(0, 255, 0, 80),
+        'ready_border': QColor(0, 255, 0),
+        'cd': QColor(255, 0, 0, 80),
+        'cd_border': QColor(255, 0, 0),
+        'disabled': QColor(128, 128, 128, 80),
+        'disabled_border': QColor(128, 128, 128),
+        'casting': QColor(0, 122, 255, 120),
+        'casting_border': QColor(0, 122, 255),
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setGeometry(QApplication.desktop().screenGeometry())
+        self.cfg = config_helper.read_config()
+        self._skill_states = {}
+        self._cast_tracker = None
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.timeout.connect(self._update_states)
+        self._refresh_timer.start(100)
+
+    def _get_cast_tracker(self):
+        if self._cast_tracker is None:
+            from bot.rotation import _cast_tracker
+            self._cast_tracker = _cast_tracker
+        return self._cast_tracker
+
+    def _update_states(self):
+        try:
+            self.cfg = config_helper.read_config()
+            class_name = str(config_helper.get_shared_config('class', '')).strip().lower()
+            if not class_name:
+                return
+            skillpath = Path(__file__).resolve().parents[2] / "assets" / "skills"
+            icon_map = {'skill1': '01', 'skill2': '02', 'skill3': '03', 'skill4': '04', 'skill5': '05', 'skill6': '06'}
+            cls_cfg = config_helper.get_class_config(class_name.capitalize())
+
+            for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
+                if not cls_cfg.get(f'{key}_enabled', True):
+                    self._skill_states[key] = 'disabled'
+                    continue
+
+                if key in ('pot', 'evade'):
+                    icon_path = str(skillpath / f'{key}.png')
+                else:
+                    icon_path = str(skillpath / class_name / (icon_map[key] + '.png'))
+
+                pos = cls_cfg.get(f'{key}_pos')
+                if not pos or len(pos) < 4:
+                    self._skill_states[key] = 'cd'
+                    continue
+
+                region = (pos[0], pos[1], pos[0] + pos[2], pos[1] + pos[3])
+                conf = 0.9 if key in ('skill5', 'skill6') else 0.6
+                found = image_helper.locate_needle(icon_path, conf=conf, region=region)
+                self._skill_states[key] = 'ready' if found else 'cd'
+
+        except Exception as ex:
+            logging_helper.log_debug(f"LiveVisualizer._update_states error: {ex}")
+
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
+        if hp_vals and len(hp_vals) >= 2:
+            hx, hy = hp_vals[0], hp_vals[1]
+            hp_colors = hp_vals[2] if len(hp_vals) > 2 and isinstance(hp_vals[2], list) else [[95, 10, 15]]
+            if hp_colors and isinstance(hp_colors[0], (int, float)):
+                hp_colors = [hp_colors]
+            hp_ratio = 0.5
+            for c in hp_colors:
+                if len(c) >= 3 and image_helper.pixel_matches_color(hx, hy, c[0], c[1], c[2], 45):
+                    hp_ratio = 1.0
+                    break
+            hp_color = QColor(int(255 * (1 - hp_ratio)), int(255 * hp_ratio), 0)
+            self._draw_crosshair(painter, hx, hy, hp_color, f"HP {int(hp_ratio*100)}%")
+
+        label_map = {
+            'skill1': 'S1', 'skill2': 'S2', 'skill3': 'S3',
+            'skill4': 'S4', 'skill5': 'S5', 'skill6': 'S6', 'pot': 'POT', 'evade': 'EVADE'
+        }
+
+        current_class = config_helper.get_shared_config('class', 'Paladin')
+        cls_cfg = config_helper.get_class_config(current_class)
+
+        for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
+            pos = cls_cfg.get(f'{key}_pos')
+            if not pos or len(pos) < 4:
+                continue
+
+            x, y, w, h = pos[0], pos[1], pos[2], pos[3]
+            state = self._skill_states.get(key, 'cd')
+
+            cast_tracker = self._get_cast_tracker()
+            if cast_tracker and cast_tracker.is_flashing(key):
+                state = 'casting'
+
+            fill_color = self.STATE_COLORS.get(state, self.STATE_COLORS['cd'])
+            border_color = getattr(self.STATE_COLORS, f'{state}_border', QColor(255, 0, 0))
+
+            painter.setPen(QPen(border_color, 3))
+            painter.setBrush(QBrush(fill_color))
+            painter.drawRect(x, y, w, h)
+            self._draw_label(painter, f"{label_map.get(key, key.upper())}:{state.upper()}", x, y - 15, border_color)
+
+        self._draw_legend(painter)
+
+    def _draw_legend(self, painter):
+        legend_x = 20
+        legend_y = 20
+        line_h = 18
+        items = [
+            ('READY', self.STATE_COLORS['ready_border']),
+            ('CD', self.STATE_COLORS['cd_border']),
+            ('DISABLED', self.STATE_COLORS['disabled_border']),
+            ('CASTING', self.STATE_COLORS['casting_border']),
+        ]
+        painter.setPen(QPen(Qt.white, 1))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+        for i, (label, color) in enumerate(items):
+            y = legend_y + i * line_h
+            painter.setPen(QPen(color, 2))
+            painter.drawRect(legend_x, y, 14, 14)
+            painter.setPen(QPen(Qt.white, 1))
+            painter.drawText(legend_x + 20, y + 12, label)
+
+    def _draw_crosshair(self, painter, x, y, color, label):
+        painter.setPen(QPen(color, 2))
+        painter.drawLine(x - 8, y, x + 8, y)
+        painter.drawLine(x, y - 8, x, y + 8)
+        painter.drawEllipse(x - 4, y - 4, 8, 8)
+        self._draw_label(painter, label, x + 8, y - 15, color)
+
+    def _draw_label(self, painter, text, x, y, color):
+        painter.setPen(QPen(Qt.white, 1))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
+        font = painter.font()
+        font.setPointSize(9)
+        painter.setFont(font)
+        bg_rect = QRect(x - 2, y - 14, painter.fontMetrics().width(text) + 6, 16)
+        painter.drawRect(bg_rect)
+        painter.drawText(x + 2, y, text)
+
+    def mousePressEvent(self, event):
+        self.close()
+
+
+class ConfigVisualizer(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setGeometry(QApplication.desktop().screenGeometry())
+        self.cfg = config_helper.read_config()
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.timeout.connect(self.update)
+        self._refresh_timer.start(100)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
+        if hp_vals and len(hp_vals) >= 2:
+            hx, hy = hp_vals[0], hp_vals[1]
+            painter.setPen(QPen(QColor(255, 255, 0), 2))
+            painter.drawLine(hx - 8, hy, hx + 8, hy)
+            painter.drawLine(hx, hy - 8, hx, hy + 8)
+            self._draw_label(painter, "HP PIXEL", hx + 10, hy - 10, QColor(255, 255, 0))
+
+        skill_labels = {
+            'skill1': 'Skill 1', 'skill2': 'Skill 2', 'skill3': 'Skill 3',
+            'skill4': 'Skill 4', 'skill5': 'Skill 5', 'skill6': 'Skill 6',
+            'pot': 'Potion', 'evade': 'Evade'
+        }
+        current_class = config_helper.get_shared_config('class', 'Paladin')
+        cls_cfg = config_helper.get_class_config(current_class)
+        for key, label in skill_labels.items():
+            vals = cls_cfg.get(f'{key}_pos')
+            if vals and len(vals) >= 4:
+                x, y, w, h = vals[0], vals[1], vals[2], vals[3]
+                painter.setPen(QPen(QColor(255, 0, 255), 2))
+                painter.drawRect(x, y, w, h)
+                self._draw_label(painter, label, x + 5, y + h // 2, QColor(255, 0, 255))
+
+    def _draw_label(self, painter, text, x, y, color):
+        painter.setPen(QPen(Qt.white, 1))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 150)))
+        font = painter.font()
+        font.setPointSize(9)
+        painter.setFont(font)
+        bg_rect = QRect(x - 2, y - 14, painter.fontMetrics().width(text) + 6, 16)
+        painter.drawRect(bg_rect)
+        painter.drawText(x + 2, y, text)
+
+    def mousePressEvent(self, event):
+        self.close()
+
+    def run(self):
+        self.show()
+        self.grabMouse()
+        self.setFocus()
+        self.raise_()
+        self.activateWindow()
+        while self.isVisible():
+            QApplication.processEvents()
+        self.releaseMouse()
+
 
 class Toolbox(QDialog):
     def __init__(self, parent=None):
         super(Toolbox, self).__init__(parent)
         self.running = False
-        self.image_name = 'default'
-        self.image_path = '.\\assets\\skills\\'
-        self.abs_x_coord = 0
-        self.abs_y_coord = 0
-        self.x_coord = 10
-        self.y_coord = 10
-        self.file_name = 'default'
-        self.file_name_replay = 'default.txt'
-        self.recording = []
-        self.started = False
-        self.replay_thread = None
-        self.record = recorder_helper.Record()
         self.cfg = config_helper.read_config()
         self.name = self.cfg.get('apptitle', 'notepad')
+        self._live_viz = None
 
         try:
             self.setWindowIcon(QIcon('.\\assets\\layout\\mmorpg_helper.ico'))
@@ -35,281 +347,390 @@ class Toolbox(QDialog):
 
         QApplication.setStyle(QStyleFactory.create('Fusion'))
         self.setWindowTitle(self.name)
-        self.setGeometry(700, 300, 600, 250)
-        self.setFixedSize(600, 250)
+        self.setGeometry(700, 300, 600, 520)
+        self.setMinimumSize(600, 520)
 
         self.label = QLabel(self)
         self.label.setPixmap(self.pixmap)
         self.label.resize(self.pixmap.width(), self.pixmap.height())
 
-        add_hotkey('F12', lambda: self.on_press('image'))
-        add_hotkey('F11', lambda: self.on_press('coords'))
-        add_hotkey('F10', lambda: self.on_press('color'))
         add_hotkey('end', lambda: self.on_press('exit'))
 
-        self.createImageCrop()
-        self.createRecordBox()
-        self.createReplayBox()
+        self.createConfigBox()
+        self.load_config_to_fields()
 
         mainLayout = QGridLayout()
-        mainLayout.addWidget(self.imageCrop, 0, 0, 1, 2)
-        mainLayout.addWidget(self.recordBox, 1, 0, 1, 2)
-        mainLayout.addWidget(self.replayBox, 2, 0, 1, 2)
-        mainLayout.setRowStretch(1, 1)
-        mainLayout.setColumnStretch(1, 1)
+        mainLayout.addWidget(self.configBox, 0, 0)
         self.setLayout(mainLayout)
 
-    def set_image_name(self):
-        self.image_name = str(self.text_box1.text())
-
-    def set_image_path(self):
-        self.image_path = str(self.text_box2.text())
-
-    def get_x_coord(self):
-        text = self.text_box5.text().strip()
-        if text:
-            self.abs_x_coord = int(text)
-
-    def get_y_coord(self):
-        text = self.text_box6.text().strip()
-        if text:
-            self.abs_y_coord = int(text)
-
-    def set_x_coord(self):
-        text = self.text_box3.text().strip()
-        if text:
-            self.x_coord = int(text)
-
-    def set_y_coord(self):
-        text = self.text_box4.text().strip()
-        if text:
-            self.y_coord = int(text)
-
-    def set_file_name(self):
-        self.file_name = str(self.saveTextBox.text())
-
-    def set_file_name_replay(self, index):
-        self.file_name_replay = str(self.replayComboBox.itemText(index))
-
-    def get_image_file_path(self):
-        file_name = self.image_name
-        if not file_name.lower().endswith('.png'):
-            file_name = f"{file_name}.png"
-        return path.join(self.image_path, file_name)
-
-    def check_folder(self):
-        self.model.clear()
-        if not path.exists("record"):
-            return
-        for p in listdir("record"):
-            if p.endswith(".txt"):
-                self.model.appendRow(QStandardItem(p))
-        if self.model.rowCount() > 0:
-            self.replayComboBox.setCurrentIndex(0)
-
-    def save_as(self):
-        if self.recording:
-            makedirs("record", exist_ok=True)
-            file_path = f".\\record\\{self.file_name}.txt"
-            if path.exists(file_path):
-                logging_helper.log_error("Filename already taken")
-            else:
-                with open(file_path, "w") as f:
-                    f.write(str(self.recording))
-                self.check_folder()
-                logging_helper.log_info(f"File saved as: {self.file_name}.txt")
-        else:
-            logging_helper.log_error("Nothing recorded yet")
-
-    def start(self):
-        self.record.prepare_record_start()
-        logging_helper.log_info("Recording...")
-        self.started = True
-
-    def stop(self):
-        if self.started:
-            self.recording = self.record.record_stop()
-            logging_helper.log_info("Recording stopped")
-            self.started = False
-        else:
-            logging_helper.log_error("Nothing to stop")
-
-    def replay(self):
-        try:
-            logging_helper.log_info("Replaying...")
-            rec = recorder_helper.Replay(f".\\record\\{self.file_name_replay}")
-            def run_replay():
-                self.running = True
-                rec.replay_run()
-                self.running = False
-                logging_helper.log_info("Replay stopped")
-
-            self.replay_thread = Thread(target=run_replay, daemon=True)
-            self.replay_thread.start()
-        except FileNotFoundError as e:
-            logging_helper.log_error(f"File not found: {e}")
-        except SyntaxError as e:
-            logging_helper.log_error(f"Syntax error in file: {e}")
-
-    def createImageCrop(self):
-        self.imageCrop = QGroupBox('Image Crop')
-        self.imageCrop.setStyleSheet('QGroupBox:title {color: rgb(0,255,0);}')
-        layout = QHBoxLayout()
-
-        common_style = 'background:rgb(204,153,51);'
-
-        self.text_box1 = QLineEdit(str(self.image_name))
-        self.text_box1.setStyleSheet(common_style)
-        self.text_box1.setFixedSize(80, 20)
-        self.text_box1.textChanged.connect(self.set_image_name)
-
-        self.text_box2 = QLineEdit(str(self.image_path))
-        self.text_box2.setStyleSheet(common_style)
-        self.text_box2.setFixedSize(240, 20)
-        self.text_box2.textChanged.connect(self.set_image_path)
-
-        self.text_box5 = QLineEdit(str(self.abs_x_coord))
-        self.text_box5.setStyleSheet(common_style)
-        self.text_box5.setFixedSize(30, 20)
-        self.text_box5.setValidator(QIntValidator())
-        self.text_box5.setMaxLength(4)
-        self.text_box5.textChanged.connect(self.get_x_coord)
-
-        self.text_box6 = QLineEdit(str(self.abs_y_coord))
-        self.text_box6.setStyleSheet(common_style)
-        self.text_box6.setFixedSize(30, 20)
-        self.text_box6.setValidator(QIntValidator())
-        self.text_box6.setMaxLength(4)
-        self.text_box6.textChanged.connect(self.get_y_coord)
-
-        self.text_box3 = QLineEdit(str(self.x_coord))
-        self.text_box3.setStyleSheet(common_style)
-        self.text_box3.setFixedSize(25, 20)
-        self.text_box3.setValidator(QIntValidator())
-        self.text_box3.setMaxLength(2)
-        self.text_box3.textChanged.connect(self.set_x_coord)
-
-        self.text_box4 = QLineEdit(str(self.y_coord))
-        self.text_box4.setStyleSheet(common_style)
-        self.text_box4.setFixedSize(25, 20)
-        self.text_box4.setValidator(QIntValidator())
-        self.text_box4.setMaxLength(2)
-        self.text_box4.textChanged.connect(self.set_y_coord)
-
-        self.imageLabel = QLabel(self)
-        pixmap = QPixmap(self.get_image_file_path())
-        self.imageLabel.setPixmap(pixmap)
-        self.imageLabel.resize(pixmap.width(), pixmap.height())
-
-        layout.addWidget(self.text_box1)
-        layout.addStretch(1)
-        layout.addWidget(self.text_box2)
-        layout.addStretch(1)
-        layout.addWidget(self.text_box5)
-        layout.addStretch(1)
-        layout.addWidget(self.text_box6)
-        layout.addStretch(1)
-        layout.addWidget(self.text_box3)
-        layout.addStretch(1)
-        layout.addWidget(self.text_box4)
-        layout.addStretch(3)
-        layout.addWidget(self.imageLabel)
-        layout.addStretch(5)
-        self.imageCrop.setLayout(layout)
-
-    def createRecordBox(self):
-        self.recordBox = QGroupBox('Recorder')
-        self.recordBox.setStyleSheet('QGroupBox:title {color: rgb(0,255,0);}')
-        layout = QHBoxLayout()
-
-        toggleStartButton = QPushButton("Start")
-        toggleStartButton.setCheckable(False)
-        toggleStartButton.clicked.connect(self.start)
-
-        toggleStopButton = QPushButton("Stop")
-        toggleStopButton.setCheckable(False)
-        toggleStopButton.clicked.connect(self.stop)
-
-        self.saveTextBox = QLineEdit(str(self.file_name))
-        self.saveTextBox.setStyleSheet('background:rgb(204,153,51);')
-        self.saveTextBox.setFixedSize(80, 20)
-        self.saveTextBox.textChanged.connect(self.set_file_name)
-
-        toggleSaveButton = QPushButton("Save as")
-        toggleSaveButton.setCheckable(False)
-        toggleSaveButton.clicked.connect(self.save_as)
-
-        layout.addWidget(toggleStartButton)
-        layout.addStretch(1)
-        layout.addWidget(toggleStopButton)
-        layout.addStretch(7)
-        layout.addWidget(self.saveTextBox)
-        layout.addStretch(1)
-        layout.addWidget(toggleSaveButton)
-        layout.addStretch(1)
-        self.recordBox.setLayout(layout)
-
-    def createReplayBox(self):
-        self.replayBox = QGroupBox('Player')
-        self.replayBox.setStyleSheet('QGroupBox:title {color: rgb(0,255,0);}')
-        layout = QHBoxLayout()
-
-        self.model = QStandardItemModel()
-        self.replayComboBox = QComboBox()
-        self.replayComboBox.setModel(self.model)
-        self.check_folder()
-        self.replayComboBox.activated.connect(self.set_file_name_replay)
-
-        toggleReplayButton = QPushButton("Replay")
-        toggleReplayButton.setCheckable(False)
-        toggleReplayButton.clicked.connect(self.replay)
-
-        layout.addWidget(self.replayComboBox)
-        layout.addStretch(1)
-        layout.addWidget(toggleReplayButton)
-        layout.addStretch(20)
-        self.replayBox.setLayout(layout)
-
     def on_press(self, key):
-        actions = {
-            'image': self.get_image_from_pos,
-            'coords': self.get_image_from_coord,
-            'color': self.get_color_from_pos,
-            'exit': self.exit_app
-        }
-        action = actions.get(key)
-        if action:
-            action()
+        if key == 'exit':
+            self.exit_app()
         else:
             logging_helper.log_error(f"Unknown key: {key}")
-
-    def get_color_from_pos(self):
-        x, y, r, g, b = image_helper.get_pixel_color_at_cursor()
-        self.text_box5.setText(str(x))
-        self.text_box6.setText(str(y))
-        logging_helper.log_info(f"Position and color: x,y, r,g,b={x},{y}, {r},{g},{b}")
-
-    def get_image_from_pos(self):
-        if path.exists(self.get_image_file_path()):
-            logging_helper.log_error("Filename already taken")
-        else:
-            x, y = image_helper.get_image_at_cursor(self.x_coord, self.y_coord, self.image_name, self.image_path)
-            logging_helper.log_info(f"File saved as: {self.image_name}.png location: {self.image_path} position: x={x}, y={y}, size={self.x_coord}, {self.y_coord}")
-            self.update_image_label()
-
-    def get_image_from_coord(self):
-        if path.exists(self.get_image_file_path()):
-            logging_helper.log_error("Filename already taken")
-        else:
-            x, y = image_helper.get_image_from_coordinates(self.abs_x_coord, self.abs_y_coord, self.image_name, self.image_path)
-            logging_helper.log_info(f"File saved as: {self.image_name}.png location: {self.image_path} absolute coordinates: x={x}, y={y}")
-            self.update_image_label()
-
-    def update_image_label(self):
-        pixmap = QPixmap(self.get_image_file_path())
-        self.imageLabel.setPixmap(pixmap)
-        self.imageLabel.resize(pixmap.width(), pixmap.height())
 
     def exit_app(self):
         logging_helper.log_info("Exiting application")
         QApplication.quit()
+
+    def createConfigBox(self):
+        self.configBox = QGroupBox('Game Config')
+        self.configBox.setStyleSheet('QGroupBox:title {color: rgb(0,255,0);}')
+        layout = QGridLayout()
+
+        common_style = 'background:rgb(204,153,51);'
+        label_style = 'color: rgb(0,255,0);'
+
+        self.cfg = config_helper.read_config()
+
+        layout.addWidget(QLabel('HP Detection:'), 0, 0)
+        layout.addWidget(self._make_hp_row(common_style, label_style), 1, 0, 1, 4)
+
+        layout.addWidget(QLabel('Skills & Utility:'), 2, 0)
+        layout.addWidget(self._make_skill_row('skill1', 'q', (801, 45), 'Skill 1', common_style, label_style), 3, 0, 1, 4)
+        layout.addWidget(self._make_skill_row('skill2', 'w', (710, 45), 'Skill 2', common_style, label_style), 4, 0, 1, 4)
+        layout.addWidget(self._make_skill_row('skill3', 'e', (619, 45), 'Skill 3', common_style, label_style), 5, 0, 1, 4)
+        layout.addWidget(self._make_skill_row('skill4', 'r', (528, 45), 'Skill 4', common_style, label_style), 6, 0, 1, 4)
+        layout.addWidget(self._make_skill_row('skill5', 'leftclick', (890, 45), 'Skill 5 (LMouse)', common_style, label_style), 7, 0, 1, 4)
+        layout.addWidget(self._make_skill_row('skill6', 'rightclick', (980, 45), 'Skill 6 (RMouse)', common_style, label_style), 8, 0, 1, 4)
+        layout.addWidget(self._make_skill_row('pot', '2', (437, 45), 'Potion', common_style, label_style), 9, 0, 1, 4)
+        layout.addWidget(self._make_skill_row('evade', 'space', (346, 45), 'Evade', common_style, label_style), 10, 0, 1, 4)
+
+        layout.addWidget(QLabel('Rotation Hotkey:'), 13, 0)
+        hotkey_ed = QLineEdit(str(self.cfg.get('rotation_hotkey', 'f6')))
+        hotkey_ed.setStyleSheet(common_style)
+        hotkey_ed.setFixedSize(80, 20)
+        hotkey_ed.setObjectName('rotation_hotkey')
+        layout.addWidget(hotkey_ed, 13, 1)
+
+        loadBtn = QPushButton('LOAD FROM CONFIG')
+        loadBtn.clicked.connect(self.load_config_to_fields)
+        saveBtn = QPushButton('SAVE TO CONFIG')
+        saveBtn.clicked.connect(self.save_fields_to_config)
+        vizBtn = QPushButton('VISUALIZE')
+        vizBtn.clicked.connect(self.visualize_config)
+
+        self.liveVizCheck = QCheckBox('Live Visualize')
+        self.liveVizCheck.setStyleSheet('color: rgb(0,255,0);')
+        self.liveVizCheck.stateChanged.connect(self.on_live_viz_toggled)
+
+        layout.addWidget(loadBtn, 14, 0)
+        layout.addWidget(saveBtn, 14, 1)
+        layout.addWidget(vizBtn, 14, 2)
+        layout.addWidget(self.liveVizCheck, 14, 3)
+
+        self.configBox.setLayout(layout)
+
+    def on_live_viz_toggled(self, state):
+        if state == Qt.Checked:
+            if not hasattr(self, '_live_viz') or not self._live_viz:
+                self._live_viz = LiveVisualizerWidget()
+            self._live_viz.show()
+        else:
+            if hasattr(self, '_live_viz') and self._live_viz:
+                self._live_viz.close()
+
+    def _make_coord_row(self, args, idx):
+        key, default, label_text, style, lbl_style = args
+        container = QWidget()
+        layout = QHBoxLayout()
+
+        lbl = QLabel(label_text)
+        lbl.setStyleSheet(lbl_style)
+
+        vals = self.cfg.get(key, default)
+        x, y, w, h = vals if len(vals) == 4 else default
+
+        x_ed = QLineEdit(str(x))
+        x_ed.setStyleSheet(style)
+        x_ed.setFixedSize(50, 20)
+        x_ed.setValidator(QIntValidator())
+        x_ed.setObjectName(f'coord_{idx}_x')
+
+        y_ed = QLineEdit(str(y))
+        y_ed.setStyleSheet(style)
+        y_ed.setFixedSize(50, 20)
+        y_ed.setValidator(QIntValidator())
+        y_ed.setObjectName(f'coord_{idx}_y')
+
+        w_ed = QLineEdit(str(w))
+        w_ed.setStyleSheet(style)
+        w_ed.setFixedSize(50, 20)
+        w_ed.setValidator(QIntValidator())
+        w_ed.setObjectName(f'coord_{idx}_w')
+
+        h_ed = QLineEdit(str(h))
+        h_ed.setStyleSheet(style)
+        h_ed.setFixedSize(50, 20)
+        h_ed.setValidator(QIntValidator())
+        h_ed.setObjectName(f'coord_{idx}_h')
+
+        setBtn = QPushButton('SET')
+        setBtn.setStyleSheet('background:rgb(0,180,0); color:white;')
+        setBtn.setFixedSize(40, 20)
+        setBtn.key = key
+        setBtn.idx = idx
+        setBtn.clicked.connect(self.select_region)
+
+        layout.addWidget(lbl)
+        layout.addWidget(x_ed)
+        layout.addWidget(y_ed)
+        layout.addWidget(w_ed)
+        layout.addWidget(h_ed)
+        layout.addWidget(setBtn)
+        layout.addStretch(1)
+        container.setLayout(layout)
+        return container
+
+    def _make_hp_row(self, style, lbl_style):
+        container = QWidget()
+        layout = QHBoxLayout()
+
+        lbl = QLabel('HP Pixel:')
+        lbl.setStyleSheet(lbl_style)
+
+        hp_vals = self.cfg.get('hp_pixel', (608, 980, [95, 10, 15]))
+        x, y = hp_vals[0], hp_vals[1]
+        colors = hp_vals[2] if len(hp_vals) > 2 and isinstance(hp_vals[2], list) else [95, 10, 15]
+        if isinstance(colors[0], (int, float)):
+            colors = [colors]
+
+        x_ed = QLineEdit(str(x))
+        x_ed.setStyleSheet(style)
+        x_ed.setFixedSize(50, 20)
+        x_ed.setValidator(QIntValidator())
+        x_ed.setObjectName('hp_x')
+
+        y_ed = QLineEdit(str(y))
+        y_ed.setStyleSheet(style)
+        y_ed.setFixedSize(50, 20)
+        y_ed.setValidator(QIntValidator())
+        y_ed.setObjectName('hp_y')
+
+        r_ed = QLineEdit(str(colors[0][0]))
+        r_ed.setStyleSheet(style)
+        r_ed.setFixedSize(30, 20)
+        r_ed.setValidator(QIntValidator())
+        r_ed.setObjectName('hp_r')
+
+        g_ed = QLineEdit(str(colors[0][1]))
+        g_ed.setStyleSheet(style)
+        g_ed.setFixedSize(30, 20)
+        g_ed.setValidator(QIntValidator())
+        g_ed.setObjectName('hp_g')
+
+        b_ed = QLineEdit(str(colors[0][2]))
+        b_ed.setStyleSheet(style)
+        b_ed.setFixedSize(30, 20)
+        b_ed.setValidator(QIntValidator())
+        b_ed.setObjectName('hp_b')
+
+        setBtn = QPushButton('SET HP')
+        setBtn.setStyleSheet('background:rgb(180,0,0); color:white;')
+        setBtn.setFixedSize(60, 20)
+        setBtn.clicked.connect(self.select_hp_pixel)
+
+        layout.addWidget(lbl)
+        layout.addWidget(x_ed)
+        layout.addWidget(y_ed)
+        layout.addWidget(r_ed)
+        layout.addWidget(g_ed)
+        layout.addWidget(b_ed)
+        layout.addWidget(setBtn)
+        layout.addStretch(1)
+        container.setLayout(layout)
+        return container
+
+    def select_hp_pixel(self):
+        selector = PointSelector()
+        result = selector.run()
+        if result:
+            cx, cy = result.x(), result.y()
+            self._find_and_set('hp_x', str(cx))
+            self._find_and_set('hp_y', str(cy))
+            logging_helper.log_info(f"Selected HP pixel at {cx},{cy}")
+
+    def _make_skill_row(self, key, default_key, pos_default, label_text, style, lbl_style):
+        container = QWidget()
+        layout = QHBoxLayout()
+
+        cb = QCheckBox()
+        cb.setStyleSheet('QCheckBox {color: rgb(0,255,0);}')
+        cb.setObjectName(f'skill_{key}_enabled')
+        cb.setChecked(self.cfg.get(f'{key}_enabled', True))
+
+        lbl = QLabel(label_text)
+        lbl.setStyleSheet(lbl_style)
+        lbl.setFixedSize(80, 20)
+
+        key_ed = QLineEdit(str(self.cfg.get(key, default_key)))
+        key_ed.setStyleSheet(style)
+        key_ed.setFixedSize(60, 20)
+        key_ed.setObjectName(f'skill_{key}_key')
+
+        vals = self.cfg.get(f'{key}_pos', pos_default)
+        x, y, w, h = vals if len(vals) >= 4 else (*pos_default, 60, 60)
+
+        x_ed = QLineEdit(str(x))
+        x_ed.setStyleSheet(style)
+        x_ed.setFixedSize(40, 20)
+        x_ed.setValidator(QIntValidator())
+        x_ed.setObjectName(f'skill_{key}_x')
+
+        y_ed = QLineEdit(str(y))
+        y_ed.setStyleSheet(style)
+        y_ed.setFixedSize(40, 20)
+        y_ed.setValidator(QIntValidator())
+        y_ed.setObjectName(f'skill_{key}_y')
+
+        w_ed = QLineEdit(str(w))
+        w_ed.setStyleSheet(style)
+        w_ed.setFixedSize(30, 20)
+        w_ed.setValidator(QIntValidator())
+        w_ed.setObjectName(f'skill_{key}_w')
+
+        h_ed = QLineEdit(str(h))
+        h_ed.setStyleSheet(style)
+        h_ed.setFixedSize(30, 20)
+        h_ed.setValidator(QIntValidator())
+        h_ed.setObjectName(f'skill_{key}_h')
+
+        setBtn = QPushButton('SET')
+        setBtn.setStyleSheet('background:rgb(0,180,0); color:white;')
+        setBtn.setFixedSize(40, 20)
+        setBtn.key = key
+        setBtn.clicked.connect(self.select_skill_pos)
+
+        layout.addWidget(cb)
+        layout.addWidget(lbl)
+        layout.addWidget(QLabel('K:'))
+        layout.addWidget(key_ed)
+        layout.addWidget(QLabel('X:'))
+        layout.addWidget(x_ed)
+        layout.addWidget(QLabel('Y:'))
+        layout.addWidget(y_ed)
+        layout.addWidget(QLabel('W:'))
+        layout.addWidget(w_ed)
+        layout.addWidget(QLabel('H:'))
+        layout.addWidget(h_ed)
+        layout.addWidget(setBtn)
+        layout.addStretch(1)
+        container.setLayout(layout)
+        return container
+
+    def select_hp_pixel(self):
+        selector = PointSelector()
+        result = selector.run()
+        if result:
+            cx, cy = result.x(), result.y()
+            self._find_and_set('hp_x', str(cx))
+            self._find_and_set('hp_y', str(cy))
+            logging_helper.log_info(f"Selected HP pixel at {cx},{cy}")
+
+    def select_skill_pos(self):
+        sender = self.sender()
+        key = sender.key
+        selector = RegionSelector()
+        selector.run()
+        if selector.corner1 and selector.corner2:
+            rect = QRect(selector.corner1, selector.corner2).normalized()
+            self._find_and_set(f'skill_{key}_x', str(rect.left()))
+            self._find_and_set(f'skill_{key}_y', str(rect.top()))
+            self._find_and_set(f'skill_{key}_w', str(rect.width()))
+            self._find_and_set(f'skill_{key}_h', str(rect.height()))
+            logging_helper.log_info(f"Selected skill {key} region at {rect.left()},{rect.top()} {rect.width()}x{rect.height()}")
+
+    def visualize_config(self):
+        self.cfg = config_helper.read_config()
+        viz = ConfigVisualizer()
+        viz.run()
+
+    def load_config_to_fields(self):
+        current_class = config_helper.get_current_class()
+
+        hp_vals = config_helper.get_shared_config('hp_pixel', (608, 980, [95, 10, 15]))
+        x, y = hp_vals[0], hp_vals[1]
+        colors = hp_vals[2] if len(hp_vals) > 2 and isinstance(hp_vals[2], list) else [95, 10, 15]
+        if isinstance(colors[0], (int, float)):
+            colors = [colors]
+        self._find_and_set('hp_x', str(x))
+        self._find_and_set('hp_y', str(y))
+        self._find_and_set('hp_r', str(colors[0][0]))
+        self._find_and_set('hp_g', str(colors[0][1]))
+        self._find_and_set('hp_b', str(colors[0][2]))
+
+        cls_cfg = config_helper.get_class_config(current_class)
+        for key, default in [
+            ('skill1', 'q'),
+            ('skill2', 'w'),
+            ('skill3', 'e'),
+            ('skill4', 'r'),
+            ('skill5', 'leftclick'),
+            ('skill6', 'rightclick'),
+            ('pot', '2'),
+            ('evade', 'space'),
+        ]:
+            val = cls_cfg.get(key, default)
+            self._find_and_set(f'skill_{key}_key', str(val))
+            cb = self.configBox.findChild(QCheckBox, f'skill_{key}_enabled')
+            if cb:
+                cb.setChecked(cls_cfg.get(f'{key}_enabled', True))
+
+        for key, default in [
+            ('skill1', (801, 45, 60, 60)),
+            ('skill2', (710, 45, 60, 60)),
+            ('skill3', (619, 45, 60, 60)),
+            ('skill4', (528, 45, 60, 60)),
+            ('skill5', (890, 45, 60, 60)),
+            ('skill6', (980, 45, 60, 60)),
+            ('pot', (437, 45, 60, 60)),
+            ('evade', (346, 45, 60, 60)),
+        ]:
+            vals = cls_cfg.get(f'{key}_pos', default)
+            self._find_and_set(f'skill_{key}_x', str(vals[0]))
+            self._find_and_set(f'skill_{key}_y', str(vals[1]))
+            self._find_and_set(f'skill_{key}_w', str(vals[2] if len(vals) >= 3 else 60))
+            self._find_and_set(f'skill_{key}_h', str(vals[3] if len(vals) >= 4 else 60))
+
+        self._find_and_set('rotation_hotkey', str(config_helper.get_shared_config('rotation_hotkey', 'f6')))
+
+        logging_helper.log_info(f'Loaded config values into fields for class: {current_class}')
+
+    def save_fields_to_config(self):
+        current_class = config_helper.get_current_class()
+
+        def get_val(obj_name):
+            le = self.configBox.findChild(QLineEdit, obj_name)
+            return int(le.text()) if le and le.text() else None
+
+        hp_r = get_val('hp_r') or 95
+        hp_g = get_val('hp_g') or 10
+        hp_b = get_val('hp_b') or 15
+        config_helper.save_shared_config('hp_pixel', [get_val('hp_x') or 608, get_val('hp_y') or 980, [hp_r, hp_g, hp_b]])
+
+        def get_key_val(obj_name):
+            le = self.configBox.findChild(QLineEdit, obj_name)
+            return le.text() if le and le.text() else None
+
+        for key in ['skill1', 'skill2', 'skill3', 'skill4', 'skill5', 'skill6', 'pot', 'evade']:
+            config_helper.save_class_config(current_class, key, get_key_val(f'skill_{key}_key'))
+            config_helper.save_class_config(current_class, f'{key}_pos', [
+                get_val(f'skill_{key}_x') or 0,
+                get_val(f'skill_{key}_y') or 0,
+                get_val(f'skill_{key}_w') or 60,
+                get_val(f'skill_{key}_h') or 60
+            ])
+            cb = self.configBox.findChild(QCheckBox, f'skill_{key}_enabled')
+            config_helper.save_class_config(current_class, f'{key}_enabled', cb.isChecked() if cb else True)
+
+        hotkey_le = self.configBox.findChild(QLineEdit, 'rotation_hotkey')
+        if hotkey_le and hotkey_le.text():
+            config_helper.save_shared_config('rotation_hotkey', hotkey_le.text())
+
+        logging_helper.log_info(f'Saved config values from fields for class: {current_class}')
+        bot_config.init()
+
+    def _find_and_set(self, object_name, value):
+        le = self.configBox.findChild(QLineEdit, object_name)
+        if le:
+            le.setText(value)
