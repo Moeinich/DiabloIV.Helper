@@ -28,7 +28,7 @@ class _State(Enum):
 class BaseDragSelector(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("background: transparent;")
         screen = QApplication.primaryScreen().geometry()
@@ -86,13 +86,13 @@ class BaseDragSelector(QWidget):
                 self._drag_start = pos
                 return
 
-            self._cancel()
             return
 
         if self._state == _State.IDLE:
             self._anchor = pos
             self._mouse_pos = pos
             self._state = _State.DRAWING
+            self.setCursor(Qt.CrossCursor)
 
     def mouseMoveEvent(self, event):
         pos = event.pos()
@@ -148,6 +148,8 @@ class BaseDragSelector(QWidget):
     def closeEvent(self, event):
         if self._state not in (_State.ACCEPTED, _State.CANCELLED):
             self._state = _State.CANCELLED
+        self.releaseMouse()
+        self.releaseKeyboard()
         super().closeEvent(event)
 
     def run(self):
@@ -155,6 +157,8 @@ class BaseDragSelector(QWidget):
         self.raise_()
         self.activateWindow()
         self.setFocus()
+        self.grabMouse()
+        self.grabKeyboard()
         loop = QApplication.instance()
         if loop:
             while self.isVisible():
