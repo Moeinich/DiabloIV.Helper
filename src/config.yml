@@ -140,6 +140,7 @@ classes:
       skill6_resource_max: 100
       skill6_resource_min: 0
     evade: space
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: none
     evade_delay_max: 0.0
@@ -157,12 +158,13 @@ classes:
     evade_resource_max: 100
     evade_resource_min: 0
     pot: q
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: none
     pot_delay_max: 0.0
     pot_delay_min: 0.0
     pot_enabled: false
-    pot_hp_max: 80
+    pot_hp_max: 60
     pot_hp_min: 0
     pot_mode: hp_guard
     pot_pos:
@@ -174,6 +176,7 @@ classes:
     pot_resource_max: 100
     pot_resource_min: 0
     skill1: '1'
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: none
     skill1_delay_max: 5.0
@@ -191,6 +194,7 @@ classes:
     skill1_resource_max: 100
     skill1_resource_min: 0
     skill2: '2'
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: none
     skill2_delay_max: 0.0
@@ -208,6 +212,7 @@ classes:
     skill2_resource_max: 100
     skill2_resource_min: 0
     skill3: '3'
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: none
     skill3_delay_max: 0.0
@@ -225,6 +230,7 @@ classes:
     skill3_resource_max: 100
     skill3_resource_min: 0
     skill4: '4'
+    skill4_always_available: false
     skill4_chain_delay: 0.05
     skill4_chain_next: none
     skill4_delay_max: 1.5
@@ -242,6 +248,7 @@ classes:
     skill4_resource_max: 100
     skill4_resource_min: 0
     skill5: leftclick
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: none
     skill5_delay_max: 0.0
@@ -259,6 +266,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: true
     skill6_chain_delay: 0.1
     skill6_chain_next: none
     skill6_delay_max: 0.0
@@ -266,7 +274,7 @@ classes:
     skill6_enabled: true
     skill6_hp_max: 100
     skill6_hp_min: 0
-    skill6_mode: ready
+    skill6_mode: hold
     skill6_pos:
     - 1893
     - 1303
@@ -276,6 +284,7 @@ classes:
     skill6_resource_max: 100
     skill6_resource_min: 0
   Druid:
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: ''
     evade_delay_max: 0.0
@@ -286,6 +295,7 @@ classes:
     evade_priority: 8
     evade_resource_max: 100
     evade_resource_min: 0
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: ''
     pot_delay_max: 0.0
@@ -296,6 +306,7 @@ classes:
     pot_priority: 7
     pot_resource_max: 100
     pot_resource_min: 0
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: ''
     skill1_delay_max: 0.0
@@ -306,6 +317,7 @@ classes:
     skill1_priority: 3
     skill1_resource_max: 100
     skill1_resource_min: 0
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: ''
     skill2_delay_max: 0.0
@@ -316,6 +328,7 @@ classes:
     skill2_priority: 4
     skill2_resource_max: 100
     skill2_resource_min: 0
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: ''
     skill3_delay_max: 0.0
@@ -326,6 +339,7 @@ classes:
     skill3_priority: 2
     skill3_resource_max: 100
     skill3_resource_min: 0
+    skill4_always_available: false
     skill4_chain_delay: 0.1
     skill4_chain_next: ''
     skill4_delay_max: 0.0
@@ -336,6 +350,7 @@ classes:
     skill4_priority: 1
     skill4_resource_max: 100
     skill4_resource_min: 0
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: ''
     skill5_delay_max: 0.0
@@ -347,6 +362,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: false
     skill6_chain_delay: 0.1
     skill6_chain_next: ''
     skill6_delay_max: 0.0
@@ -364,6 +380,7 @@ classes:
     skill6_resource_max: 100
     skill6_resource_min: 0
   Necromancer:
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: ''
     evade_delay_max: 0.0
@@ -374,6 +391,7 @@ classes:
     evade_priority: 8
     evade_resource_max: 100
     evade_resource_min: 0
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: ''
     pot_delay_max: 0.0
@@ -384,6 +402,7 @@ classes:
     pot_priority: 7
     pot_resource_max: 100
     pot_resource_min: 0
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: ''
     skill1_delay_max: 0.0
@@ -394,6 +413,7 @@ classes:
     skill1_priority: 3
     skill1_resource_max: 100
     skill1_resource_min: 0
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: ''
     skill2_delay_max: 0.0
@@ -404,6 +424,7 @@ classes:
     skill2_priority: 4
     skill2_resource_max: 100
     skill2_resource_min: 0
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: ''
     skill3_delay_max: 0.0
@@ -414,6 +435,7 @@ classes:
     skill3_priority: 2
     skill3_resource_max: 100
     skill3_resource_min: 0
+    skill4_always_available: false
     skill4_chain_delay: 0.1
     skill4_chain_next: ''
     skill4_delay_max: 0.0
@@ -424,6 +446,7 @@ classes:
     skill4_priority: 1
     skill4_resource_max: 100
     skill4_resource_min: 0
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: ''
     skill5_delay_max: 0.0
@@ -435,6 +458,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: false
     skill6_chain_delay: 0.1
     skill6_chain_next: ''
     skill6_delay_max: 0.0
@@ -586,6 +610,7 @@ classes:
       skill6_resource_max: 100
       skill6_resource_min: 0
     evade: space
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: ''
     evade_delay_max: 0.0
@@ -603,6 +628,7 @@ classes:
     evade_resource_max: 100
     evade_resource_min: 0
     pot: '2'
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: ''
     pot_delay_max: 0.0
@@ -620,6 +646,7 @@ classes:
     pot_resource_max: 100
     pot_resource_min: 0
     skill1: '1'
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: ''
     skill1_delay_max: 0.0
@@ -637,6 +664,7 @@ classes:
     skill1_resource_max: 100
     skill1_resource_min: 0
     skill2: '2'
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: ''
     skill2_delay_max: 0.0
@@ -654,6 +682,7 @@ classes:
     skill2_resource_max: 100
     skill2_resource_min: 0
     skill3: '3'
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: ''
     skill3_delay_max: 0.0
@@ -671,6 +700,7 @@ classes:
     skill3_resource_max: 100
     skill3_resource_min: 0
     skill4: '4'
+    skill4_always_available: false
     skill4_chain_delay: 0.1
     skill4_chain_next: ''
     skill4_delay_max: 0.0
@@ -688,6 +718,7 @@ classes:
     skill4_resource_max: 100
     skill4_resource_min: 0
     skill5: leftclick
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: ''
     skill5_delay_max: 0.0
@@ -705,6 +736,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: false
     skill6_chain_delay: 0.1
     skill6_chain_next: ''
     skill6_delay_max: 0.0
@@ -722,6 +754,7 @@ classes:
     skill6_resource_max: 100
     skill6_resource_min: 0
   Rogue:
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: ''
     evade_delay_max: 0.0
@@ -732,6 +765,7 @@ classes:
     evade_priority: 8
     evade_resource_max: 100
     evade_resource_min: 0
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: ''
     pot_delay_max: 0.0
@@ -742,6 +776,7 @@ classes:
     pot_priority: 7
     pot_resource_max: 100
     pot_resource_min: 0
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: ''
     skill1_delay_max: 0.0
@@ -752,6 +787,7 @@ classes:
     skill1_priority: 3
     skill1_resource_max: 100
     skill1_resource_min: 0
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: ''
     skill2_delay_max: 0.0
@@ -762,6 +798,7 @@ classes:
     skill2_priority: 4
     skill2_resource_max: 100
     skill2_resource_min: 0
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: ''
     skill3_delay_max: 0.0
@@ -772,6 +809,7 @@ classes:
     skill3_priority: 2
     skill3_resource_max: 100
     skill3_resource_min: 0
+    skill4_always_available: false
     skill4_chain_delay: 0.1
     skill4_chain_next: ''
     skill4_delay_max: 0.0
@@ -782,6 +820,7 @@ classes:
     skill4_priority: 1
     skill4_resource_max: 100
     skill4_resource_min: 0
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: ''
     skill5_delay_max: 0.0
@@ -793,6 +832,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: false
     skill6_chain_delay: 0.1
     skill6_chain_next: ''
     skill6_delay_max: 0.0
@@ -806,6 +846,7 @@ classes:
     skill6_resource_max: 100
     skill6_resource_min: 0
   Sorceress:
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: ''
     evade_delay_max: 0.0
@@ -816,6 +857,7 @@ classes:
     evade_priority: 8
     evade_resource_max: 100
     evade_resource_min: 0
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: ''
     pot_delay_max: 0.0
@@ -826,6 +868,7 @@ classes:
     pot_priority: 7
     pot_resource_max: 100
     pot_resource_min: 0
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: ''
     skill1_delay_max: 0.0
@@ -836,6 +879,7 @@ classes:
     skill1_priority: 3
     skill1_resource_max: 100
     skill1_resource_min: 0
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: ''
     skill2_delay_max: 0.0
@@ -846,6 +890,7 @@ classes:
     skill2_priority: 4
     skill2_resource_max: 100
     skill2_resource_min: 0
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: ''
     skill3_delay_max: 0.0
@@ -856,6 +901,7 @@ classes:
     skill3_priority: 2
     skill3_resource_max: 100
     skill3_resource_min: 0
+    skill4_always_available: false
     skill4_chain_delay: 0.1
     skill4_chain_next: ''
     skill4_delay_max: 0.0
@@ -866,6 +912,7 @@ classes:
     skill4_priority: 1
     skill4_resource_max: 100
     skill4_resource_min: 0
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: ''
     skill5_delay_max: 0.0
@@ -877,6 +924,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: false
     skill6_chain_delay: 0.1
     skill6_chain_next: ''
     skill6_delay_max: 0.0
@@ -890,6 +938,7 @@ classes:
     skill6_resource_max: 100
     skill6_resource_min: 0
   Spiritborn:
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: ''
     evade_delay_max: 0.0
@@ -900,6 +949,7 @@ classes:
     evade_priority: 8
     evade_resource_max: 100
     evade_resource_min: 0
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: ''
     pot_delay_max: 0.0
@@ -910,6 +960,7 @@ classes:
     pot_priority: 7
     pot_resource_max: 100
     pot_resource_min: 0
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: ''
     skill1_delay_max: 0.0
@@ -920,6 +971,7 @@ classes:
     skill1_priority: 3
     skill1_resource_max: 100
     skill1_resource_min: 0
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: ''
     skill2_delay_max: 0.0
@@ -930,6 +982,7 @@ classes:
     skill2_priority: 4
     skill2_resource_max: 100
     skill2_resource_min: 0
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: ''
     skill3_delay_max: 0.0
@@ -940,6 +993,7 @@ classes:
     skill3_priority: 2
     skill3_resource_max: 100
     skill3_resource_min: 0
+    skill4_always_available: false
     skill4_chain_delay: 0.1
     skill4_chain_next: ''
     skill4_delay_max: 0.0
@@ -950,6 +1004,7 @@ classes:
     skill4_priority: 1
     skill4_resource_max: 100
     skill4_resource_min: 0
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: ''
     skill5_delay_max: 0.0
@@ -961,6 +1016,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: false
     skill6_chain_delay: 0.1
     skill6_chain_next: ''
     skill6_delay_max: 0.0
@@ -974,6 +1030,7 @@ classes:
     skill6_resource_max: 100
     skill6_resource_min: 0
   Warlock:
+    evade_always_available: false
     evade_chain_delay: 0.1
     evade_chain_next: ''
     evade_delay_max: 0.0
@@ -984,6 +1041,7 @@ classes:
     evade_priority: 8
     evade_resource_max: 100
     evade_resource_min: 0
+    pot_always_available: false
     pot_chain_delay: 0.1
     pot_chain_next: ''
     pot_delay_max: 0.0
@@ -994,6 +1052,7 @@ classes:
     pot_priority: 7
     pot_resource_max: 100
     pot_resource_min: 0
+    skill1_always_available: false
     skill1_chain_delay: 0.1
     skill1_chain_next: ''
     skill1_delay_max: 0.0
@@ -1004,6 +1063,7 @@ classes:
     skill1_priority: 3
     skill1_resource_max: 100
     skill1_resource_min: 0
+    skill2_always_available: false
     skill2_chain_delay: 0.1
     skill2_chain_next: ''
     skill2_delay_max: 0.0
@@ -1014,6 +1074,7 @@ classes:
     skill2_priority: 4
     skill2_resource_max: 100
     skill2_resource_min: 0
+    skill3_always_available: false
     skill3_chain_delay: 0.1
     skill3_chain_next: ''
     skill3_delay_max: 0.0
@@ -1024,6 +1085,7 @@ classes:
     skill3_priority: 2
     skill3_resource_max: 100
     skill3_resource_min: 0
+    skill4_always_available: false
     skill4_chain_delay: 0.1
     skill4_chain_next: ''
     skill4_delay_max: 0.0
@@ -1034,6 +1096,7 @@ classes:
     skill4_priority: 1
     skill4_resource_max: 100
     skill4_resource_min: 0
+    skill5_always_available: false
     skill5_chain_delay: 0.1
     skill5_chain_next: ''
     skill5_delay_max: 0.0
@@ -1045,6 +1108,7 @@ classes:
     skill5_resource_max: 100
     skill5_resource_min: 0
     skill6: rightclick
+    skill6_always_available: false
     skill6_chain_delay: 0.1
     skill6_chain_next: ''
     skill6_delay_max: 0.0
