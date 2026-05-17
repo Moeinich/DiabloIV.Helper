@@ -17,8 +17,9 @@ from pynput import mouse as pynput_mouse
 
 WINDOW_X = 660
 WINDOW_Y = 0
-WINDOW_WIDTH = 600
+WINDOW_WIDTH = 820
 WINDOW_HEIGHT = 40
+EXPANDED_HEIGHT = 760
 ICON_PATH = str(Path(__file__).resolve().parents[1] / "assets" / "layout" / "mmorpg_helper.ico")
 
 class Overlay(QMainWindow):
@@ -31,6 +32,7 @@ class Overlay(QMainWindow):
         self._hotkey_str = None
         self._mouse_listener = None
         self._live_viz = None
+        self._toolbox_expanded = False
         self.name = config_helper.get_shared_config('apptitle', 'notepad')
         self.proc = process_helper.ProcessHelper()
 
@@ -40,24 +42,37 @@ class Overlay(QMainWindow):
         QApplication.setStyle(QStyleFactory.create('Fusion'))
         self.setWindowTitle(self.name)
         self.setGeometry(WINDOW_X, WINDOW_Y, WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.setFixedWidth(WINDOW_WIDTH)
+        self.setFixedHeight(WINDOW_HEIGHT)
         self.setStyleSheet(OVERLAY_STYLESHEET)
 
         visible_window = QWidget(self)
-        visible_window.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
         visible_window.setStyleSheet(OVERLAY_STYLESHEET)
 
         self.createDropdownBox()
         self.createStartBox()
         self.createToolBox()
 
-        mainLayout = QHBoxLayout()
-        mainLayout.setContentsMargins(8, 4, 8, 4)
-        mainLayout.setSpacing(8)
-        mainLayout.addWidget(self.dropdownBox)
-        mainLayout.addWidget(self.startBox)
-        mainLayout.addStretch(1)
-        mainLayout.addWidget(self.toolBox)
+        bar_row = QHBoxLayout()
+        bar_row.setContentsMargins(8, 4, 8, 4)
+        bar_row.setSpacing(8)
+        bar_row.addWidget(self.dropdownBox)
+        bar_row.addWidget(self.startBox)
+        bar_row.addStretch(1)
+        bar_row.addWidget(self.toolBox)
+
+        exitButton = QPushButton("EXIT")
+        exitButton.clicked.connect(self._quit_app)
+        bar_row.addWidget(exitButton)
+
+        self._toolbox_panel = toolbox.Toolbox()
+        self._toolbox_panel.setVisible(False)
+
+        mainLayout = QVBoxLayout()
+        mainLayout.setContentsMargins(0, 0, 0, 0)
+        mainLayout.setSpacing(0)
+        mainLayout.addLayout(bar_row)
+        mainLayout.addWidget(self._toolbox_panel, 1)
         self.setCentralWidget(visible_window)
         visible_window.setLayout(mainLayout)
 
@@ -137,6 +152,10 @@ class Overlay(QMainWindow):
         layout.addWidget(self.ComboBox)
         self.dropdownBox.setLayout(layout)
 
+    def _quit_app(self):
+        self.close()
+        QApplication.quit()
+
     def closeEvent(self, event):
         self.stop_rotation()
         self._unregister_hotkey()
@@ -171,7 +190,7 @@ class Overlay(QMainWindow):
         layout.setSpacing(6)
 
         toggleToolButton = QPushButton("TOOLBOX")
-        toggleToolButton.clicked.connect(self.littlehelper_toolbox)
+        toggleToolButton.clicked.connect(self._toggle_toolbox)
 
         self.liveVizButton = QPushButton("LIVE")
         self.liveVizButton.setCheckable(True)
@@ -265,9 +284,14 @@ class Overlay(QMainWindow):
         with self._lock:
             self.pause_req = pause
 
-    def littlehelper_toolbox(self):
-        app_toolbox = toolbox.Toolbox()
-        app_toolbox.show()
+    def _toggle_toolbox(self):
+        self._toolbox_expanded = not self._toolbox_expanded
+        if self._toolbox_expanded:
+            self._toolbox_panel.setVisible(True)
+            self.setFixedHeight(EXPANDED_HEIGHT)
+        else:
+            self._toolbox_panel.setVisible(False)
+            self.setFixedHeight(WINDOW_HEIGHT)
 
     def toggle_live_visualizer(self, checked):
         if checked:

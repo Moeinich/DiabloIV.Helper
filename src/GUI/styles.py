@@ -22,6 +22,20 @@ DARK_GROUPBOX = """
         padding: 0 6px;
         color: #00cc66;
     }
+    QGroupBox::indicator {
+        width: 18px; height: 18px;
+        border: 2px solid rgba(100, 60, 60, 220);
+        border-radius: 3px;
+        background-color: rgba(20, 20, 25, 255);
+    }
+    QGroupBox::indicator:checked {
+        background-color: rgba(0, 200, 100, 240);
+        border: 2px solid rgba(0, 240, 130, 200);
+    }
+    QGroupBox::indicator:unchecked {
+        background-color: rgba(60, 30, 30, 255);
+        border: 2px solid rgba(140, 50, 50, 200);
+    }
 """
 
 DARK_INPUT = """
@@ -59,15 +73,27 @@ DARK_COMBO = """
 """
 
 DARK_CHECKBOX = """
-    QCheckBox { color: #e0e0e0; spacing: 6px; }
+    QCheckBox { color: #e0e0e0; spacing: 8px; font-weight: bold; }
     QCheckBox::indicator {
-        width: 14px; height: 14px;
-        border: 1px solid rgba(80, 80, 100, 150);
-        border-radius: 2px;
-        background-color: rgba(40, 40, 55, 230);
+        width: 18px; height: 18px;
+        border: 2px solid rgba(100, 60, 60, 220);
+        border-radius: 3px;
+        background-color: rgba(20, 20, 25, 255);
     }
     QCheckBox::indicator:checked {
-        background-color: rgba(0, 180, 100, 220);
+        background-color: rgba(0, 200, 100, 240);
+        border: 2px solid rgba(0, 240, 130, 200);
+    }
+    QCheckBox::indicator:checked:hover {
+        background-color: rgba(0, 220, 120, 240);
+    }
+    QCheckBox::indicator:unchecked {
+        background-color: rgba(60, 30, 30, 255);
+        border: 2px solid rgba(140, 50, 50, 200);
+    }
+    QCheckBox::indicator:unchecked:hover {
+        background-color: rgba(80, 40, 40, 255);
+        border: 2px solid rgba(160, 60, 60, 200);
     }
 """
 

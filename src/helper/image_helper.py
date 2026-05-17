@@ -406,3 +406,31 @@ def sample_pixel_color(x: int, y: int) -> Tuple[int, int, int]:
     except Exception as ex:
         logging_helper.log_debug(f"sample_pixel_color error: {ex}")
         return (0, 0, 0)
+
+
+def read_pixel_brightness(x: int, y: int) -> float:
+    try:
+        hdc = ctypes.windll.user32.GetDC(0)
+        color = ctypes.windll.gdi32.GetPixel(hdc, int(x), int(y))
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+        r = color & 0xFF
+        g = (color >> 8) & 0xFF
+        b = (color >> 16) & 0xFF
+        return (r + g + b) / 3.0
+    except Exception:
+        return 255.0
+
+
+def classify_skill_state(calibration: Optional[dict] = None) -> str:
+    if not calibration or 'pixel1_x' not in calibration:
+        return 'ready'
+
+    t1 = calibration.get('pixel1_brightness', 100) * 0.6
+    t2 = calibration.get('pixel2_brightness', 100) * 0.6
+
+    b1 = read_pixel_brightness(calibration['pixel1_x'], calibration['pixel1_y'])
+    b2 = read_pixel_brightness(calibration['pixel2_x'], calibration['pixel2_y'])
+
+    if b1 < t1 or b2 < t2:
+        return 'cooldown'
+    return 'ready'

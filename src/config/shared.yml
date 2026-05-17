@@ -1,0 +1,34 @@
+apptitle: notepad
+class: Barbarian
+hp_orb_center:
+- 1253
+- 1321
+hp_orb_dark_color:
+- 20
+- 0
+- 0
+hp_orb_full_color:
+- 87
+- 13
+- 18
+hp_orb_radius: 86
+hp_orb_tolerance: 45
+region_detect:
+- 1149
+- 1176
+- 1012
+- 258
+resource_orb_center:
+- 2186
+- 1322
+resource_orb_dark_color:
+- 56
+- 8
+- 1
+resource_orb_full_color:
+- 69
+- 24
+- 8
+resource_orb_radius: 86
+resource_orb_tolerance: 0
+rotation_hotkey: x

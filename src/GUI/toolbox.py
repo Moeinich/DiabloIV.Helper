@@ -1,9 +1,8 @@
 from pathlib import Path
-from keyboard import add_hotkey
 from PyQt5.QtCore import Qt, QPoint, QRect, QTimer
 from PyQt5.QtGui import QIcon, QPainter, QPen, QBrush, QColor, QFont
 from PyQt5.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
+    QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QScrollArea, QSpinBox, QStyleFactory, QTabWidget,
     QVBoxLayout, QWidget,
@@ -13,7 +12,6 @@ from helper import image_helper, config_helper, logging_helper
 from bot import bot_config
 from GUI.styles import TOOLBOX_STYLESHEET
 from GUI.selectors import RectDragSelector, CircleDragSelector
-from pynput import mouse as pynput_mouse
 
 
 class LiveVisualizerWidget(QWidget):
@@ -52,7 +50,14 @@ class LiveVisualizerWidget(QWidget):
     def _update_states(self):
         try:
             from bot.rotation import get_skill_states
-            self._skill_states = get_skill_states()
+            rotation_states = get_skill_states()
+
+            from bot import bot_config
+            c = bot_config.get()
+            if c is None:
+                bot_config.init()
+                c = bot_config.get()
+
             import time as _time
             now = _time.time()
             if now - self._last_config_read >= 2.0:
@@ -64,6 +69,32 @@ class LiveVisualizerWidget(QWidget):
                 self._cached_shared = shared
                 current_class = config_helper.get_current_class()
                 self._cached_cls_cfg = config_helper.get_class_config(current_class)
+
+            if c is not None:
+                from helper import image_helper
+                debug_parts = []
+                for key in config_helper.SKILL_SLOTS:
+                    if not c.is_skill_enabled(key):
+                        self._skill_states[key] = {'state': 'disabled', 'mode': ''}
+                        debug_parts.append(f"{key}: disabled")
+                        continue
+                    if key in rotation_states and rotation_states[key].get('state') == 'casting':
+                        self._skill_states[key] = rotation_states[key]
+                        debug_parts.append(f"{key}: casting")
+                        continue
+                    cal = c.skill_calibration(key)
+                    state = image_helper.classify_skill_state(cal)
+                    self._skill_states[key] = {'state': state, 'mode': rotation_states.get(key, {}).get('mode', '')}
+                    if cal and 'pixel1_x' in cal:
+                        b1 = image_helper.read_pixel_brightness(cal['pixel1_x'], cal['pixel1_y'])
+                        b2 = image_helper.read_pixel_brightness(cal['pixel2_x'], cal['pixel2_y'])
+                        debug_parts.append(f"{key}: {state} (b1={b1:.0f} b2={b2:.0f})")
+                    else:
+                        debug_parts.append(f"{key}: {state} (no cal)")
+                if debug_parts:
+                    print("[SKILL] " + " | ".join(debug_parts))
+            else:
+                self._skill_states = rotation_states
         except Exception as ex:
             logging_helper.log_debug(f"LiveVisualizer._update_states error: {ex}")
         self.update()
@@ -278,30 +309,14 @@ class _OrbFillBar(QWidget):
             painter.drawRect(1, 1, bar_w, self.height() - 2)
 
 
-class Toolbox(QDialog):
+class Toolbox(QWidget):
     def __init__(self, parent=None):
         super(Toolbox, self).__init__(parent)
-        self.running = False
-        self._live_viz = None
 
-        try:
-            self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[1] / "assets" / "layout" / "mmorpg_helper.ico")))
-        except Exception as e:
-            logging_helper.log_error(f"Error loading icon: {e}")
-
-        QApplication.setStyle(QStyleFactory.create('Fusion'))
-        self.setWindowTitle(config_helper.get_shared_config('apptitle', 'Diablo IV Helper'))
-        self.setGeometry(100, 100, 820, 720)
-        self.setMinimumSize(820, 720)
         self.setStyleSheet(TOOLBOX_STYLESHEET)
-
-        add_hotkey('end', lambda: self._exit_app())
 
         self._build_ui()
         self.load_config_to_fields()
-
-    def _exit_app(self):
-        QApplication.quit()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -332,6 +347,7 @@ class Toolbox(QDialog):
         cb = QCheckBox("Enabled")
         cb.setObjectName(f'skill_{key}_enabled')
         cb.setChecked(True)
+        cb.toggled.connect(lambda checked, k=key: self._sync_enabled_state(k, checked, 'skill'))
         row.addWidget(cb)
 
         row.addWidget(QLabel("Key:"))
@@ -373,6 +389,19 @@ class Toolbox(QDialog):
         set_btn.clicked.connect(lambda checked, k=key: self.select_skill_pos(k))
         row.addWidget(set_btn)
 
+        cal_btn = QPushButton("CALIBRATE")
+        cal_btn.setFixedSize(85, 24)
+        cal_btn.setToolTip("Calibrate skill state detection (HSV)")
+        cal_btn.setObjectName(f'skill_{key}_cal_btn')
+        cal_btn.clicked.connect(lambda checked, k=key: self._calibrate_skill(k))
+        row.addWidget(cal_btn)
+
+        cal_status = QLabel("⚠")
+        cal_status.setObjectName(f'skill_{key}_cal_status')
+        cal_status.setToolTip("⚠ = using fallback thresholds | ✓ = calibrated")
+        cal_status.setFixedSize(20, 20)
+        row.addWidget(cal_status)
+
         row.addStretch()
         return group
 
@@ -395,6 +424,7 @@ class Toolbox(QDialog):
         group.setCheckable(True)
         group.setChecked(True)
         group.setObjectName(f'macro_group_{key}')
+        group.toggled.connect(lambda checked, k=key: self._sync_enabled_state(k, checked, 'macro'))
         vbox = QVBoxLayout(group)
         vbox.setContentsMargins(8, 18, 8, 8)
         vbox.setSpacing(4)
@@ -495,10 +525,83 @@ class Toolbox(QDialog):
         always_cb = QCheckBox("Always Available (ignore cooldown)")
         always_cb.setObjectName(f'macro_{key}_always_available')
         row5.addWidget(always_cb)
+        hold_cb = QCheckBox("Always Hold")
+        hold_cb.setObjectName(f'macro_{key}_always_hold')
+        hold_cb.setChecked(True)
+        hold_cb.setVisible(False)
+        row5.addWidget(hold_cb)
         row5.addStretch()
         vbox.addLayout(row5)
 
+        mode_cb.currentTextChanged.connect(lambda text, k=key: self._update_hold_visibility(k))
+
         return group
+
+    def _sync_enabled_state(self, key, checked, source):
+        if source == 'skill':
+            macro_group = self.findChild(QGroupBox, f'macro_group_{key}')
+            if macro_group and macro_group.isChecked() != checked:
+                macro_group.blockSignals(True)
+                macro_group.setChecked(checked)
+                macro_group.blockSignals(False)
+        elif source == 'macro':
+            cb = self.findChild(QCheckBox, f'skill_{key}_enabled')
+            if cb and cb.isChecked() != checked:
+                cb.blockSignals(True)
+                cb.setChecked(checked)
+                cb.blockSignals(False)
+
+    def _update_cal_status(self, key):
+        status_lbl = self.findChild(QLabel, f'skill_{key}_cal_status')
+        if not status_lbl:
+            return
+        cls_cfg = config_helper.get_class_config(config_helper.read_config().get('class', 'Paladin'))
+        cal = cls_cfg.get(f'{key}_cal')
+        if cal and isinstance(cal, dict) and 'pixel1_x' in cal:
+            status_lbl.setText("✓")
+            status_lbl.setStyleSheet("color: #00cc66; font-weight: bold;")
+        else:
+            status_lbl.setText("⚠")
+            status_lbl.setStyleSheet("color: #cc8800; font-weight: bold;")
+
+    def _calibrate_skill(self, key):
+        from PyQt5.QtWidgets import QMessageBox
+        from GUI.selectors import ColorPickerOverlay
+
+        ret = QMessageBox.information(
+            self, f"Calibrate {self._slot_label(key)}",
+            "Make sure the skill is READY (off cooldown).\n\n"
+            "Click OK, then click 2 pixels on the skill icon where the cooldown sweep passes.\n\n"
+            "Tip: pick spots that go DARK when the skill is on cooldown.",
+            QMessageBox.Ok | QMessageBox.Cancel
+        )
+        if ret != QMessageBox.Ok:
+            return
+
+        picker = ColorPickerOverlay()
+        picker._prompt = "Click PIXEL 1 on the skill icon (cooldown sweep area)"
+        result = picker.run()
+        if result is None or len(picker._clicks) < 2:
+            return
+
+        p1 = picker._clicks[0]['pos']
+        p2 = picker._clicks[1]['pos']
+        b1 = image_helper.read_pixel_brightness(p1.x(), p1.y())
+        b2 = image_helper.read_pixel_brightness(p2.x(), p2.y())
+
+        calibration = {
+            'pixel1_x': p1.x(), 'pixel1_y': p1.y(), 'pixel1_brightness': round(b1, 1),
+            'pixel2_x': p2.x(), 'pixel2_y': p2.y(), 'pixel2_brightness': round(b2, 1),
+        }
+
+        current_class = config_helper.read_config().get('class', 'Paladin')
+        config_helper.batch_save({}, {current_class: {f'{key}_cal': calibration}})
+        logging_helper.log_info(f"Calibrated {key}: {calibration}")
+        self._update_cal_status(key)
+        QMessageBox.information(self, "Calibration",
+            f"{self._slot_label(key)} calibrated!\n"
+            f"Pixel 1: ({p1.x()}, {p1.y()}) brightness={b1:.1f}\n"
+            f"Pixel 2: ({p2.x()}, {p2.y()}) brightness={b2:.1f}")
 
     def _update_macro_title(self, key):
         group = self.findChild(QGroupBox, f'macro_group_{key}')
@@ -508,6 +611,12 @@ class Toolbox(QDialog):
             mode = mode_cb.currentText()
             pri = pri_sp.value()
             group.setTitle(f"{self._slot_label(key)}  —  {mode}, pri:{pri}")
+
+    def _update_hold_visibility(self, key):
+        mode_cb = self.findChild(QComboBox, f'macro_{key}_mode')
+        hold_cb = self.findChild(QCheckBox, f'macro_{key}_always_hold')
+        if mode_cb and hold_cb:
+            hold_cb.setVisible(mode_cb.currentText() == 'hold')
 
     def _build_bar_setup_tab(self):
         scroll = QScrollArea()
@@ -867,7 +976,19 @@ class Toolbox(QDialog):
             if always_cb:
                 always_cb.setChecked(cls_cfg.get(f'{key}_always_available', False))
 
+            hold_cb = self.findChild(QCheckBox, f'macro_{key}_always_hold')
+            if hold_cb:
+                hold_cb.setChecked(cls_cfg.get(f'{key}_always_hold', True))
+
+            macro_group = self.findChild(QGroupBox, f'macro_group_{key}')
+            if macro_group:
+                macro_group.blockSignals(True)
+                macro_group.setChecked(cls_cfg.get(f'{key}_enabled', True))
+                macro_group.blockSignals(False)
+
             self._update_macro_title(key)
+            self._update_hold_visibility(key)
+            self._update_cal_status(key)
 
         hp_center = config_helper.get_shared_config('hp_orb_center')
         if hp_center:
@@ -979,7 +1100,9 @@ class Toolbox(QDialog):
                 _sv(f'skill_{key}_h', 60),
             ]
             cb = self.findChild(QCheckBox, f'skill_{key}_enabled')
-            class_updates[f'{key}_enabled'] = cb.isChecked() if cb else True
+            macro_group = self.findChild(QGroupBox, f'macro_group_{key}')
+            enabled = (cb.isChecked() if cb else True) and (macro_group.isChecked() if macro_group else True)
+            class_updates[f'{key}_enabled'] = enabled
 
             class_updates[f'{key}_mode'] = _cv(f'macro_{key}_mode', 'ready')
             class_updates[f'{key}_priority'] = _sv(f'macro_{key}_priority', 5)
@@ -993,6 +1116,8 @@ class Toolbox(QDialog):
             class_updates[f'{key}_resource_max'] = _sv(f'macro_{key}_resource_max', 100)
             always_cb = self.findChild(QCheckBox, f'macro_{key}_always_available')
             class_updates[f'{key}_always_available'] = always_cb.isChecked() if always_cb else False
+            hold_cb = self.findChild(QCheckBox, f'macro_{key}_always_hold')
+            class_updates[f'{key}_always_hold'] = hold_cb.isChecked() if hold_cb else True
 
         config_helper.batch_save(shared_updates, {current_class: class_updates})
         logging_helper.log_info(f'Saved config for class: {current_class}')

@@ -1,10 +1,7 @@
 from threading import Lock
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from helper import config_helper, logging_helper
-
-SKILLPATH = Path(__file__).resolve().parents[1] / "assets" / "skills"
 
 _cache_lock = Lock()
 _cache = None
@@ -15,7 +12,7 @@ VALID_CLASSES = {'Druid', 'Spiritborn', 'Barbarian', 'Necromancer', 'Sorceress',
 _PER_SLOT_ATTRS = ['key', 'enabled', 'pos', 'mode', 'priority',
                    'delay_min', 'delay_max', 'hp_min', 'hp_max',
                    'resource_min', 'resource_max', 'chain_next', 'chain_delay',
-                   'always_available']
+                   'always_available', 'always_hold', 'cal']
 
 _ORB_ATTRS = ['hp_orb_center', 'hp_orb_radius', 'hp_orb_full_color', 'hp_orb_dark_color', 'hp_orb_tolerance',
               'resource_orb_center', 'resource_orb_radius', 'resource_orb_full_color', 'resource_orb_dark_color', 'resource_orb_tolerance']
@@ -49,8 +46,8 @@ class BotConfig:
             return (pos[0], pos[1], pos[0] + pos[2], pos[1] + pos[3])
         return None
 
-    def skill_icon(self, idx: str) -> str:
-        return str(SKILLPATH / self.class_lower / (idx + '.png'))
+    def skill_calibration(self, key: str) -> Optional[dict]:
+        return getattr(self, f'{key}_cal', None)
 
     def is_skill_enabled(self, key: str) -> bool:
         return getattr(self, f'{key}_enabled', True)
@@ -90,6 +87,9 @@ class BotConfig:
 
     def skill_always_available(self, key: str) -> bool:
         return bool(getattr(self, f'{key}_always_available', False))
+
+    def skill_always_hold(self, key: str) -> bool:
+        return bool(getattr(self, f'{key}_always_hold', True))
 
 
 def init():
@@ -147,16 +147,6 @@ def init():
             image_helper.set_skill_bar_region((min_x, min_y, max_x, max_y))
         except Exception:
             pass
-
-    try:
-        from helper import image_helper
-        for idx in ('01', '02', '03', '04', '05', '06'):
-            icon_path = str(SKILLPATH / c.class_lower / (idx + '.png'))
-            image_helper._get_needle_image(icon_path)
-        image_helper._get_needle_image(str(SKILLPATH / 'pot.png'))
-        image_helper._get_needle_image(str(SKILLPATH / 'evade.png'))
-    except Exception:
-        pass
 
     with _cache_lock:
         _cache = c

@@ -1,41 +1,64 @@
-# <img src="assets/layout/mmorpg_helper_title.png">
+# Diablo IV Rotation Assistant
 
-## DESCRIPTION
-- Diablo 4 combat assistant, pixel bot and toolbox.
-- Set up a combat rotation and let the assistant do the combat.
-- Set up a combat rotation and let the helltide-bot do the combat, pathing and looting. (WiP)
-- Use the macro recorder/player to get a waypoint file and let the bot do the combat, pathing and looting. (WiP)
+A combat rotation assistant for Diablo IV with macro capabilities. Configure per-skill behavior modes, priorities, cooldown detection, and more through an integrated overlay UI.
 
+## Features
 
-## PARAMETER
-- Recomended use of windowed fullscreen with 1920x1080 resolution.
-- Recomended use of US/EN or standard keyboard layout.
-- Set a different apptitle (anticheat) and adjust the key assignment in .\config\config.yml.
-- Set monster health bar -> always on.
-- Set pathfinder -> on.
-- Set basic skill on left mouse and core skill on right mouse.
-- Python 3.9 interpreter, see requirements.txt.
+- **Macro System** — Per-skill configurable modes: ready, delay, hold, hp_guard, resource_guard
+- **Pixel-Based Cooldown Detection** — Calibrate 2 check pixels per skill for reliable ready/cooldown state
+- **HP & Resource Orb Reading** — Circle-based orb fill detection for HP and resource thresholds
+- **Live Visualizer** — Real-time overlay showing skill states with color-coded indicators
+- **Integrated Toolbox** — All configuration accessible directly from the overlay bar
+- **Per-Class Configs** — Each class has its own config file for easy sharing (`src/config/ClassName/config.yml`)
+- **Humanized Casting** — Layered randomized delays and micro-variations for natural behavior
 
+## Requirements
 
-## USAGE
-- Recomended usage is the assistant in combination with the toolbox to build a custom skill rotation,
-    just use folder names, in .\assets\skills\ like: barbarian, necromant, sorceress and assign the
-    proper skill image to the correct number: 01-04 from left to right and 05 for your right mouse button.
-    Take a look at .\src\engine\combat.py and customize the function to your needs.
-- Start the helltide-bot somewhere in the openworld, optimal in onyx watchtower or rakhat keep.
-- Use the macro recorder to get a waypoint file, atm for testing purpose.
-- With toolbox open: 'F10' hotkey get coordinates and rgb colors at mouse cursor.
-- With toolbox open: 'F11' hotkey save image per parameters from gui at coordinates.
-- With toolbox open: 'F12' hotkey save image per parameters from gui at mouse cursor.
-- 'end' hotkey exit active process.
-- 'delete' or 'capslock' hotkey to pause active process. Use to toggle fight on/off.
+- Python 3.9+
+- Windows (uses Win32 API for pixel reading)
 
+## Setup
 
-## CREDITS
-- https://stackoverflow.com
-- https://github.com
-- https://chatgpt.com
-- Written in Python by DarkDBx
+1. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 
+2. Run:
+   ```
+   run.bat
+   ```
 
-Support me: https://paypal.me/darkdb
+## Usage
+
+1. Select your class from the dropdown in the overlay bar
+2. Open the **TOOLBOX** to configure skill positions, keybinds, and macro rules
+3. Calibrate each skill's cooldown detection by clicking **CAL** and picking 2 pixels on the skill icon
+4. Set up HP/Resource orb detection in the **Bar Setup** tab
+5. Press the configured hotkey (default: `X`) or click **START** to begin rotation
+
+## Controls
+
+- **Hotkey** (default `X`) — Toggle rotation on/off
+- **LIVE** — Toggle live skill state visualizer
+- **TOOLBOX** — Open/close integrated configuration panel
+- **EXIT** — Stop and quit
+
+## Configuration
+
+Configuration is stored per-class in `src/config/`:
+
+```
+src/config/
+  shared.yml          # Global settings (hotkey, orb calibration, etc.)
+  Barbarian/config.yml
+  Druid/config.yml
+  Sorceress/config.yml
+  ...
+```
+
+Share a class config by copying its folder to another installation.
+
+## Credits
+
+This project started from [DarkDBx/DiabloIV.Helper](https://github.com/DarkDBx/DiabloIV.Helper).
