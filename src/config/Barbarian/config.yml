@@ -1,5 +1,6 @@
 evade: space
 evade_always_available: false
+evade_always_hold: true
 evade_cal:
   pixel1_brightness: 152.7
   pixel1_x: 2106
@@ -25,6 +26,7 @@ evade_resource_max: 100
 evade_resource_min: 0
 pot: q
 pot_always_available: false
+pot_always_hold: true
 pot_cal:
   pixel1_brightness: 152.7
   pixel1_x: 1335
@@ -50,6 +52,7 @@ pot_resource_max: 100
 pot_resource_min: 0
 skill1: '1'
 skill1_always_available: false
+skill1_always_hold: true
 skill1_cal:
   pixel1_brightness: 173.7
   pixel1_x: 1516
@@ -61,7 +64,7 @@ skill1_chain_delay: 0.1
 skill1_chain_next: none
 skill1_delay_max: 5.0
 skill1_delay_min: 2.0
-skill1_enabled: true
+skill1_enabled: false
 skill1_hp_max: 100
 skill1_hp_min: 0
 skill1_mode: delay
@@ -75,6 +78,7 @@ skill1_resource_max: 100
 skill1_resource_min: 0
 skill2: '2'
 skill2_always_available: false
+skill2_always_hold: true
 skill2_cal:
   pixel1_brightness: 175.7
   pixel1_x: 1598
@@ -86,7 +90,7 @@ skill2_chain_delay: 0.1
 skill2_chain_next: none
 skill2_delay_max: 0.0
 skill2_delay_min: 0.0
-skill2_enabled: false
+skill2_enabled: true
 skill2_hp_max: 100
 skill2_hp_min: 0
 skill2_mode: ready
@@ -95,11 +99,12 @@ skill2_pos:
 - 1307
 - 72
 - 65
-skill2_priority: 2
+skill2_priority: 6
 skill2_resource_max: 100
 skill2_resource_min: 0
 skill3: '3'
 skill3_always_available: false
+skill3_always_hold: true
 skill3_cal:
   pixel1_brightness: 209.7
   pixel1_x: 1680
@@ -120,11 +125,12 @@ skill3_pos:
 - 1309
 - 64
 - 63
-skill3_priority: 1
+skill3_priority: 2
 skill3_resource_max: 100
 skill3_resource_min: 0
 skill4: '4'
 skill4_always_available: false
+skill4_always_hold: true
 skill4_cal:
   pixel1_brightness: 201.0
   pixel1_x: 1764
@@ -145,11 +151,12 @@ skill4_pos:
 - 1309
 - 65
 - 63
-skill4_priority: 4
+skill4_priority: 1
 skill4_resource_max: 100
 skill4_resource_min: 0
-skill5: leftclick
+skill5: e
 skill5_always_available: false
+skill5_always_hold: true
 skill5_cal:
   pixel1_brightness: 137.3
   pixel1_x: 1850
@@ -170,11 +177,12 @@ skill5_pos:
 - 1307
 - 66
 - 65
-skill5_priority: 5
+skill5_priority: 2
 skill5_resource_max: 100
 skill5_resource_min: 0
 skill6: rightclick
 skill6_always_available: true
+skill6_always_hold: true
 skill6_cal:
   pixel1_brightness: 125.0
   pixel1_x: 1931
@@ -186,7 +194,7 @@ skill6_chain_delay: 0.1
 skill6_chain_next: none
 skill6_delay_max: 0.0
 skill6_delay_min: 0.0
-skill6_enabled: true
+skill6_enabled: false
 skill6_hp_max: 100
 skill6_hp_min: 0
 skill6_mode: hold

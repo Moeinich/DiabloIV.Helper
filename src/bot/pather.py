@@ -1,6 +1,6 @@
 from random import randint
 from functools import wraps
-from pydirectinput import leftClick, press
+from helper.input_helper import leftClick, press
 import os
 import time
 

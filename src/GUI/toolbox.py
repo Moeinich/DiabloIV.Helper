@@ -315,6 +315,7 @@ class Toolbox(QWidget):
 
         self.setStyleSheet(TOOLBOX_STYLESHEET)
 
+        self._live_viz = None
         self._build_ui()
         self.load_config_to_fields()
 

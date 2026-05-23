@@ -1,7 +1,7 @@
 from random import uniform, random, shuffle
 from time import sleep
 from typing import Dict, List, Optional, Tuple
-from pydirectinput import keyDown, keyUp, leftClick, rightClick
+from helper.input_helper import keyDown, keyUp, leftClick, rightClick, mouseDown, mouseUp
 
 from helper import image_helper, timer_helper, logging_helper
 from helper.timer_helper import TIMER_STOPPED
@@ -150,9 +150,10 @@ def release_held_key():
     global _held_skill, _held_hotkey
     if _held_hotkey:
         try:
-            if _held_skill in ('skill5', 'skill6'):
-                from pydirectinput import mouseUp
-                mouseUp(button='left' if _held_skill == 'skill5' else 'right')
+            if _held_hotkey == 'leftclick':
+                mouseUp(button='left')
+            elif _held_hotkey == 'rightclick':
+                mouseUp(button='right')
             else:
                 keyUp(_held_hotkey)
         except Exception:
@@ -212,11 +213,9 @@ def _cast_skill(c: bot_config.BotConfig, key: str, delay_mult: float) -> bool:
     if is_hold:
         if _held_skill == key:
             return False
-        if key == 'skill5':
-            from pydirectinput import mouseDown
+        if hotkey == 'leftclick':
             mouseDown(button='left')
-        elif key == 'skill6':
-            from pydirectinput import mouseDown
+        elif hotkey == 'rightclick':
             mouseDown(button='right')
         else:
             sleep(_reaction_delay())
@@ -227,9 +226,9 @@ def _cast_skill(c: bot_config.BotConfig, key: str, delay_mult: float) -> bool:
         logging_helper.log_info(f'Holding {key}')
         return True
 
-    if key == 'skill5':
+    if hotkey == 'leftclick':
         leftClick()
-    elif key == 'skill6':
+    elif hotkey == 'rightclick':
         rightClick()
     else:
         human_press(hotkey)

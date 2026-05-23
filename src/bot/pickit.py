@@ -1,7 +1,7 @@
 from time import sleep
 from random import randint, uniform
 from typing import Tuple, List, Sequence
-from pydirectinput import leftClick
+from helper.input_helper import leftClick
 from pathlib import Path
 import os
 import logging

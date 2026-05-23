@@ -3,13 +3,14 @@
 
 import sys
 import signal
+import webbrowser
 from typing import Mapping
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QMessageBox, QPushButton
 from PyQt5.QtCore import QCoreApplication, QTimer
 
 from GUI import overlay
-from helper import config_helper, logging_helper
+from helper import config_helper, logging_helper, input_helper
 
 APPNAME = 'notepad'
 APPVERSION = '1.2026.0502.2312'
@@ -49,6 +50,22 @@ def main() -> int:
         except Exception as ex:
             logging_helper.log_error("Failed to initialize GUI overlay: %s" % ex)
             return 2
+
+        if not input_helper.is_driver_installed():
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle("Interception Driver Required")
+            msg.setText("Interception driver is not installed.")
+            msg.setInformativeText(
+                "This application requires the Interception driver for hardware-level input.\n\n"
+                "Please install it and restart."
+            )
+            dl_btn = msg.addButton("Open Download Page", QMessageBox.ActionRole)
+            msg.addButton("Exit", QMessageBox.RejectRole)
+            msg.exec_()
+            if msg.clickedButton() == dl_btn:
+                webbrowser.open("https://github.com/oblitum/Interception/releases")
+            return 4
 
         # Logging-Level setzen (sofern DEBUG verfuegbar)
         """

@@ -6,7 +6,7 @@ import numpy as np
 from numpy import random as nprandom
 from random import random, randint, uniform
 from math import dist, factorial
-from pydirectinput import position, moveTo
+from helper.input_helper import moveTo, position
 from win32con import WHEEL_DELTA, MOUSEEVENTF_WHEEL
 from win32api import mouse_event
 
