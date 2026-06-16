@@ -271,6 +271,16 @@ class Overlay(QMainWindow):
         while self.running:
             while self.should_pause():
                 sleep(0.25)
+            if not self._is_d4_focused():
+                rotation.release_held_key()
+                logging_helper.log_info("D4 lost focus, pausing rotation")
+                while self.running and not self._is_d4_focused():
+                    while self.should_pause():
+                        sleep(0.25)
+                    sleep(0.25)
+                if self.running:
+                    logging_helper.log_info("D4 regained focus, resuming rotation")
+                continue
             rotation.rotation()
             sleep(0.1)
 
